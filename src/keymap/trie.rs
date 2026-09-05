@@ -164,6 +164,8 @@ impl std::str::FromStr for KeyEvent {
             if ch.is_ascii_lowercase() && modifiers.contains(KeyModifiers::SHIFT) {
                 code = KeyCode::Char(ch.to_ascii_uppercase());
                 modifiers.remove(KeyModifiers::SHIFT);
+            } else if ch.is_ascii_uppercase() {
+                modifiers.remove(KeyModifiers::SHIFT);
             }
         }
 
@@ -344,12 +346,16 @@ pub fn default_keymap() -> HashMap<Mode, KeyTrie> {
     normal.insert(KeyEvent::char('e'), leaf(EditorAction::MoveWordEnd));
     normal.insert(KeyEvent::char('x'), leaf(EditorAction::SelectLine));
     normal.insert(KeyEvent::char('i'), leaf(EditorAction::EnterInsert));
+    normal.insert(KeyEvent::char('I'), leaf(EditorAction::InsertAtLineStart));
     normal.insert(KeyEvent::char('a'), leaf(EditorAction::EnterInsertAfter));
+    normal.insert(KeyEvent::char('A'), leaf(EditorAction::InsertAtLineEnd));
     normal.insert(KeyEvent::char('v'), leaf(EditorAction::EnterSelect));
     normal.insert(KeyEvent::char('d'), leaf(EditorAction::DeleteSelection));
     normal.insert(KeyEvent::char('c'), leaf(EditorAction::ChangeSelection));
     normal.insert(KeyEvent::char('y'), leaf(EditorAction::YankSelection));
     normal.insert(KeyEvent::char('p'), leaf(EditorAction::PasteAfter));
+    normal.insert(KeyEvent::char('u'), leaf(EditorAction::Undo));
+    normal.insert(KeyEvent::char('U'), leaf(EditorAction::Redo));
     // Esc handled specially in get().
 
     // g prefix
@@ -406,6 +412,8 @@ pub fn default_keymap() -> HashMap<Mode, KeyTrie> {
     select.insert(KeyEvent::char('b'), leaf(EditorAction::MoveWordBackward));
     select.insert(KeyEvent::char('e'), leaf(EditorAction::MoveWordEnd));
     select.insert(KeyEvent::char('x'), leaf(EditorAction::SelectLine));
+    select.insert(KeyEvent::char('I'), leaf(EditorAction::InsertAtLineStart));
+    select.insert(KeyEvent::char('A'), leaf(EditorAction::InsertAtLineEnd));
     // d/y/c still meaningful in select
     select.insert(KeyEvent::char('d'), leaf(EditorAction::DeleteSelection));
     select.insert(KeyEvent::char('c'), leaf(EditorAction::ChangeSelection));
@@ -509,6 +517,8 @@ pub fn gdk_to_key_event(keyval: u32, state: u32) -> Option<KeyEvent> {
     if let KeyCode::Char(ch) = code {
         if ch.is_ascii_lowercase() && mods.contains(KeyModifiers::SHIFT) {
             code = KeyCode::Char(ch.to_ascii_uppercase());
+            mods_norm.remove(KeyModifiers::SHIFT);
+        } else if ch.is_ascii_uppercase() {
             mods_norm.remove(KeyModifiers::SHIFT);
         }
         // Space etc should not retain SHIFT.
@@ -670,5 +680,46 @@ mod tests {
             root.search(&[KeyEvent::char('w')]),
             Some(&KeyTrie::Leaf(EditorAction::MoveWordForward))
         );
+        assert_eq!(
+            root.search(&[KeyEvent::char('I')]),
+            Some(&KeyTrie::Leaf(EditorAction::InsertAtLineStart))
+        );
+        assert_eq!(
+            root.search(&[KeyEvent::char('A')]),
+            Some(&KeyTrie::Leaf(EditorAction::InsertAtLineEnd))
+        );
+    }
+
+    #[test]
+    fn helix_a_i_u_redo_keybinds() {
+        let map = default_keymap();
+        let root = map.get(&Mode::Normal).unwrap();
+        assert_eq!(
+            root.search(&[KeyEvent::char('I')]),
+            Some(&KeyTrie::Leaf(EditorAction::InsertAtLineStart))
+        );
+        assert_eq!(
+            root.search(&[KeyEvent::char('A')]),
+            Some(&KeyTrie::Leaf(EditorAction::InsertAtLineEnd))
+        );
+        assert_eq!(
+            root.search(&[KeyEvent::char('u')]),
+            Some(&KeyTrie::Leaf(EditorAction::Undo))
+        );
+        assert_eq!(
+            root.search(&[KeyEvent::char('U')]),
+            Some(&KeyTrie::Leaf(EditorAction::Redo))
+        );
+
+        // Test GDK conversion with SHIFT mask
+        const SHIFT_MASK: u32 = 1;
+        let ev_a = gdk_to_key_event('A' as u32, SHIFT_MASK).unwrap();
+        assert_eq!(ev_a, KeyEvent::char('A'));
+        let ev_i = gdk_to_key_event('I' as u32, SHIFT_MASK).unwrap();
+        assert_eq!(ev_i, KeyEvent::char('I'));
+        let ev_u = gdk_to_key_event('u' as u32, 0).unwrap();
+        assert_eq!(ev_u, KeyEvent::char('u'));
+        let ev_cap_u = gdk_to_key_event('U' as u32, SHIFT_MASK).unwrap();
+        assert_eq!(ev_cap_u, KeyEvent::char('U'));
     }
 }

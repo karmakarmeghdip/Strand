@@ -678,27 +678,72 @@ pub fn paste_after(buffer: &impl IsA<TextBuffer>, text: &str) {
     buffer.insert(&mut iter, text);
 }
 
+pub fn insert_at_line_start(buffer: &impl IsA<TextBuffer>) {
+    let buffer = buffer.as_ref();
+    let cur = buffer.iter_at_mark(&buffer.get_insert());
+    let line = cur.line();
+    let line_start = buffer.iter_at_line(line).unwrap_or_else(|| buffer.start_iter());
+    let mut target = line_start;
+    let mut non_ws_found = false;
+    while !target.ends_line() {
+        let ch = target.char();
+        if !ch.is_whitespace() {
+            non_ws_found = true;
+            break;
+        }
+        if !target.forward_char() {
+            break;
+        }
+    }
+    if non_ws_found {
+        buffer.place_cursor(&target);
+    } else {
+        buffer.place_cursor(&line_start);
+    }
+}
+
+pub fn insert_at_line_end(buffer: &impl IsA<TextBuffer>) {
+    let buffer = buffer.as_ref();
+    let cur = buffer.iter_at_mark(&buffer.get_insert());
+    let line = cur.line();
+    let mut iter = buffer.iter_at_line(line).unwrap_or_else(|| buffer.end_iter());
+    if !iter.ends_line() {
+        iter.forward_to_line_end();
+    }
+    buffer.place_cursor(&iter);
+}
+
+pub fn undo(buffer: &impl IsA<TextBuffer>) {
+    let buffer = buffer.as_ref();
+    if buffer.can_undo() {
+        buffer.undo();
+    }
+}
+
+pub fn redo(buffer: &impl IsA<TextBuffer>) {
+    let buffer = buffer.as_ref();
+    if buffer.can_redo() {
+        buffer.redo();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use gtk::prelude::*;
 
     fn ensure_gtk() -> bool {
-        if gtk::is_initialized() {
-            let ok = std::panic::catch_unwind(|| {
-                let _ = gtk::TextBuffer::new(None);
-            })
-            .is_ok();
-            return ok;
+        static INIT: std::sync::Once = std::sync::Once::new();
+        INIT.call_once(|| {
+            let _ = std::panic::catch_unwind(|| gtk::init());
+        });
+        if !gtk::is_initialized() {
+            return false;
         }
-        let res = std::panic::catch_unwind(|| gtk::init());
-        match res {
-            Ok(Ok(())) => std::panic::catch_unwind(|| {
-                let _ = gtk::TextBuffer::new(None);
-            })
-            .is_ok(),
-            _ => false,
-        }
+        std::panic::catch_unwind(|| {
+            let _ = gtk::TextBuffer::new(None);
+        })
+        .is_ok()
     }
 
     fn make_buffer(text: &str) -> TextBuffer {
@@ -802,6 +847,60 @@ mod tests {
         buf.place_cursor(&buf.iter_at_offset(5));
         paste_after(&buf, " world");
         assert_eq!(buf.text(&buf.start_iter(), &buf.end_iter(), false), "hello world");
+    }
+
+    #[test]
+    fn undo_redo_basic() {
+        if !ensure_gtk() {
+            return;
+        }
+        let buf = make_buffer("hello");
+        buf.set_enable_undo(true);
+        buf.insert_at_cursor(" world");
+        assert_eq!(buf.text(&buf.start_iter(), &buf.end_iter(), false), "hello world");
+        assert!(buf.can_undo());
+        undo(&buf);
+        assert_eq!(buf.text(&buf.start_iter(), &buf.end_iter(), false), "hello");
+        assert!(buf.can_redo());
+        redo(&buf);
+        assert_eq!(buf.text(&buf.start_iter(), &buf.end_iter(), false), "hello world");
+    }
+
+    #[test]
+    fn line_start_and_end_motions() {
+        if !ensure_gtk() {
+            return;
+        }
+        // Test with indentation
+        let buf = make_buffer("    fn foo() {\n        let x = 1;\n    }");
+        buf.place_cursor(&buf.iter_at_offset(10));
+        insert_at_line_start(&buf);
+        assert_eq!(offset_at_insert(&buf), 4); // First non-ws character 'f'
+        insert_at_line_end(&buf);
+        assert_eq!(offset_at_insert(&buf), 14); // End of line before '\n'
+
+        // Test second line
+        buf.place_cursor(&buf.iter_at_offset(20));
+        insert_at_line_start(&buf);
+        assert_eq!(offset_at_insert(&buf), 23); // 'l' in "        let" (15 + 8)
+        insert_at_line_end(&buf);
+        assert_eq!(offset_at_insert(&buf), 33); // after ';' before '\n'
+
+        // Test line without indentation
+        let buf2 = make_buffer("hello world");
+        buf2.place_cursor(&buf2.iter_at_offset(5));
+        insert_at_line_start(&buf2);
+        assert_eq!(offset_at_insert(&buf2), 0);
+        insert_at_line_end(&buf2);
+        assert_eq!(offset_at_insert(&buf2), 11);
+
+        // Test line with only whitespace
+        let buf3 = make_buffer("    \nsecond");
+        buf3.place_cursor(&buf3.iter_at_offset(2));
+        insert_at_line_start(&buf3);
+        assert_eq!(offset_at_insert(&buf3), 0);
+        insert_at_line_end(&buf3);
+        assert_eq!(offset_at_insert(&buf3), 4);
     }
 
     #[test]

@@ -37,6 +37,8 @@ pub enum EditorAction {
     // Mode switches (structural — via Relm4 message)
     EnterInsert,
     EnterInsertAfter, // a (optional)
+    InsertAtLineStart, // I
+    InsertAtLineEnd,   // A
     EnterSelect,      // v
     ExitToNormal,     // Esc
 
@@ -46,6 +48,8 @@ pub enum EditorAction {
     YankSelection,   // y
     PasteAfter,      // p
     PasteBefore,     // P
+    Undo,            // u
+    Redo,            // U
 
     // Structural / palette
     Noop,
@@ -64,6 +68,8 @@ impl EditorAction {
             Self::SelectLine => "select line",
             Self::EnterInsert => "enter insert mode",
             Self::EnterInsertAfter => "append after cursor",
+            Self::InsertAtLineStart => "insert at line start",
+            Self::InsertAtLineEnd => "insert at line end",
             Self::EnterSelect => "enter select mode",
             Self::ExitToNormal => "enter normal mode",
             Self::DeleteSelection => "delete selection",
@@ -71,6 +77,8 @@ impl EditorAction {
             Self::YankSelection => "yank selection",
             Self::PasteAfter => "paste after",
             Self::PasteBefore => "paste before",
+            Self::Undo => "undo change",
+            Self::Redo => "redo change",
             Self::Noop => "no operation",
         }
     }

@@ -111,6 +111,16 @@ where
             state.set_mode(Mode::Insert);
             KeyHandleResult::ModeChanged(Mode::Insert)
         }
+        EditorAction::InsertAtLineStart => {
+            motions::insert_at_line_start(buffer);
+            state.set_mode(Mode::Insert);
+            KeyHandleResult::ModeChanged(Mode::Insert)
+        }
+        EditorAction::InsertAtLineEnd => {
+            motions::insert_at_line_end(buffer);
+            state.set_mode(Mode::Insert);
+            KeyHandleResult::ModeChanged(Mode::Insert)
+        }
         EditorAction::EnterSelect => {
             if state.mode == Mode::Select {
                 // already in select — toggle to Normal and collapse
@@ -171,6 +181,22 @@ where
             motions::paste_after(buffer, &clip);
             KeyHandleResult::Stop
         }
+        EditorAction::Undo => {
+            motions::undo(buffer);
+            if state.mode == Mode::Select {
+                state.set_mode(Mode::Normal);
+                return KeyHandleResult::ModeChanged(Mode::Normal);
+            }
+            KeyHandleResult::Stop
+        }
+        EditorAction::Redo => {
+            motions::redo(buffer);
+            if state.mode == Mode::Select {
+                state.set_mode(Mode::Normal);
+                return KeyHandleResult::ModeChanged(Mode::Normal);
+            }
+            KeyHandleResult::Stop
+        }
         EditorAction::Noop => KeyHandleResult::Stop,
     }
 }
@@ -178,25 +204,20 @@ where
 #[cfg(test)]
 mod tests {
     fn ensure_gtk() -> bool {
-        if gtk::is_initialized() {
-            let ok = std::panic::catch_unwind(|| {
-                let _ = gtk::TextBuffer::new(None);
-            })
-            .is_ok();
-            return ok;
+        static INIT: std::sync::Once = std::sync::Once::new();
+        INIT.call_once(|| {
+            let _ = std::panic::catch_unwind(|| gtk::init());
+        });
+        if !gtk::is_initialized() {
+            return false;
         }
-        let res = std::panic::catch_unwind(|| gtk::init());
-        match res {
-            Ok(Ok(())) => std::panic::catch_unwind(|| {
-                let _ = gtk::TextBuffer::new(None);
-            })
-            .is_ok(),
-            _ => false,
-        }
+        std::panic::catch_unwind(|| {
+            let _ = gtk::TextBuffer::new(None);
+        })
+        .is_ok()
     }
     use super::*;
     use crate::keymap::{trie::KeyCode, KeyModifiers};
-    use gtk::prelude::*;
 
     fn buf_with(text: &str) -> gtk::TextBuffer {
         let b = gtk::TextBuffer::new(None);
@@ -472,5 +493,97 @@ mod tests {
         handle_key(&mut state2, &buf, KeyEvent { code: crate::keymap::trie::KeyCode::Up, modifiers: crate::keymap::trie::KeyModifiers::empty() });
         let after_up = buf.iter_at_mark(&buf.get_insert()).line();
         assert_eq!(after_up, before_line - 1, "Up should go up");
+    }
+
+    #[test]
+    fn normal_i_and_a_insert_at_line_start_and_end() {
+        if !ensure_gtk() {
+            return;
+        }
+        let mut state = EditorState::new();
+        let buf = buf_with("    let x = 10;");
+        buf.place_cursor(&buf.iter_at_offset(8));
+
+        // 'I' enters insert mode at first non-whitespace
+        let res = handle_key(&mut state, &buf, KeyEvent::char('I'));
+        assert_eq!(res, KeyHandleResult::ModeChanged(Mode::Insert));
+        assert_eq!(state.mode, Mode::Insert);
+        assert_eq!(buf.iter_at_mark(&buf.get_insert()).offset(), 4);
+
+        // Esc back to normal
+        handle_key(
+            &mut state,
+            &buf,
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
+        );
+        assert_eq!(state.mode, Mode::Normal);
+
+        // 'A' enters insert mode at end of line
+        let res2 = handle_key(&mut state, &buf, KeyEvent::char('A'));
+        assert_eq!(res2, KeyHandleResult::ModeChanged(Mode::Insert));
+        assert_eq!(state.mode, Mode::Insert);
+        assert_eq!(buf.iter_at_mark(&buf.get_insert()).offset(), 15);
+    }
+
+    #[test]
+    fn select_mode_i_and_a() {
+        if !ensure_gtk() {
+            return;
+        }
+        let mut state = EditorState::new();
+        let buf = buf_with("    fn main() {}");
+        state.set_mode(Mode::Select);
+        buf.select_range(&buf.iter_at_offset(4), &buf.iter_at_offset(8));
+
+        let res = handle_key(&mut state, &buf, KeyEvent::char('I'));
+        assert_eq!(res, KeyHandleResult::ModeChanged(Mode::Insert));
+        assert_eq!(state.mode, Mode::Insert);
+        assert_eq!(buf.iter_at_mark(&buf.get_insert()).offset(), 4);
+
+        // Esc to normal, enter select again
+        handle_key(
+            &mut state,
+            &buf,
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
+        );
+        state.set_mode(Mode::Select);
+        buf.select_range(&buf.iter_at_offset(4), &buf.iter_at_offset(8));
+
+        let res2 = handle_key(&mut state, &buf, KeyEvent::char('A'));
+        assert_eq!(res2, KeyHandleResult::ModeChanged(Mode::Insert));
+        assert_eq!(state.mode, Mode::Insert);
+        assert_eq!(buf.iter_at_mark(&buf.get_insert()).offset(), 16);
+    }
+
+    #[test]
+    fn undo_and_redo_keys() {
+        if !ensure_gtk() {
+            return;
+        }
+        let mut state = EditorState::new();
+        let buf = buf_with("initial");
+        buf.set_enable_undo(true);
+        buf.place_cursor(&buf.iter_at_offset(7));
+        buf.insert_at_cursor(" text");
+        assert_eq!(
+            buf.text(&buf.start_iter(), &buf.end_iter(), false),
+            "initial text"
+        );
+
+        // 'u' undos
+        let res = handle_key(&mut state, &buf, KeyEvent::char('u'));
+        assert_eq!(res, KeyHandleResult::Stop);
+        assert_eq!(
+            buf.text(&buf.start_iter(), &buf.end_iter(), false),
+            "initial"
+        );
+
+        // 'U' redos
+        let res2 = handle_key(&mut state, &buf, KeyEvent::char('U'));
+        assert_eq!(res2, KeyHandleResult::Stop);
+        assert_eq!(
+            buf.text(&buf.start_iter(), &buf.end_iter(), false),
+            "initial text"
+        );
     }
 }

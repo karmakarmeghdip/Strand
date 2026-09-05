@@ -62,6 +62,7 @@ impl SimpleComponent for App {
 
         // ----- GtkSourceBuffer: single source of truth (Invariant #1) -----
         let buffer = sourceview5::Buffer::new(None);
+        buffer.set_enable_undo(true);
 
         // Language: Rust for demo highlighting. Falls back to plain if unavailable.
         let lang_manager = sourceview5::LanguageManager::default();
@@ -128,7 +129,7 @@ fn main() {
 
         // ----- AdwHeaderBar -----
         let header = adw::HeaderBar::new();
-        let title = adw::WindowTitle::new("Strand", "NORMAL — h/j/k/l w/b/e x i d/c/y/p v | Esc");
+        let title = adw::WindowTitle::new("Strand", "NORMAL — h/j/k/l w/b/e x i/I a/A u/U d/c/y/p v | Esc");
         header.set_title_widget(Some(&title));
 
         // ----- Root layout: vertical Box -----
@@ -172,9 +173,9 @@ fn main() {
                 KeyHandleResult::ModeChanged(new_mode) => {
                     // Update header subtitle imperatively for immediate feedback
                     let subtitle = match new_mode {
-                        Mode::Normal => "NORMAL — h/j/k/l w/b/e x i d/c/y/p v | Esc",
+                        Mode::Normal => "NORMAL — h/j/k/l w/b/e x i/I a/A u/U d/c/y/p v | Esc",
                         Mode::Insert => "INSERT — Esc to normal",
-                        Mode::Select => "SELECT — h/j/k/l w/b/e x d/y/c Esc",
+                        Mode::Select => "SELECT — h/j/k/l w/b/e x I/A d/y/c Esc",
                     };
                     title_for_key.set_subtitle(subtitle);
                     // Also via Relm4 for structural state sync
@@ -209,9 +210,9 @@ fn main() {
 
     fn update_view(&self, widgets: &mut Self::Widgets, _sender: ComponentSender<Self>) {
         let subtitle = match self.mode {
-            Mode::Normal => "NORMAL — h/j/k/l w/b/e x i d/c/y/p v | Esc",
+            Mode::Normal => "NORMAL — h/j/k/l w/b/e x i/I a/A u/U d/c/y/p v | Esc",
             Mode::Insert => "INSERT — Esc to normal",
-            Mode::Select => "SELECT — h/j/k/l w/b/e x d/y/c Esc",
+            Mode::Select => "SELECT — h/j/k/l w/b/e x I/A d/y/c Esc",
         };
         widgets.title.set_subtitle(subtitle);
     }
