@@ -110,7 +110,7 @@ src/lsp/                                helix-lsp/
 ### Phase 7: Keymap & Input Module Decomposition
 *Goal: Decompose the 860-line `trie.rs` monolith to cleanly mirror `helix-term/keymap/` and `helix-view/input.rs`.*
 
-- [ ] **7.1 Decompose `src/keymap/` into single-responsibility modules**
+- [x] **7.1 Decompose `src/keymap/` into single-responsibility modules**
   - **Priority**: P1 (Refactor)
   - **Files**: `src/keymap/input.rs`, `src/keymap/trie.rs`, `src/keymap/default.rs`, `src/keymap/mod.rs`
   - **Details**:
@@ -119,9 +119,9 @@ src/lsp/                                helix-lsp/
     - Move `default_keymap()`, `build_space_node()`, `build_match_node()`, and `build_goto_node()` into `src/keymap/default.rs`.
   - **Verification**: `cargo check`, `cargo test` pass with 0 warnings.
 
-- [ ] **7.2 Keymap Configuration & Custom Bindings Abstraction**
+- [x] **7.2 Keymap Configuration & Custom Bindings Abstraction**
   - **Priority**: P2 (Architecture)
-  - **Files**: `src/keymap/mod.rs`, `src/keymap/default.rs`
+  - **Files**: `src/keymap/mod.rs`, `src/keymap/default.rs`, `src/keymap/trie.rs`
   - **Details**:
     - Lay groundwork for user key remapping (similar to Helix `config.toml [keys.normal]`).
     - Provide an API to merge custom keybinding overrides into `KeyTrieRoot`.

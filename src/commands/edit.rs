@@ -3,7 +3,7 @@ use gtk::prelude::*;
 use crate::commands::Context;
 use crate::components::editor::controller::KeyHandleResult;
 use crate::core as motions;
-use crate::keymap::{trie::KeyCode, Mode};
+use crate::keymap::{KeyCode, Mode};
 
 pub fn enter_insert(cx: &mut Context) -> KeyHandleResult {
     cx.state.set_mode(Mode::Insert);

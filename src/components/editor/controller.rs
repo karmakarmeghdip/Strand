@@ -2,7 +2,7 @@
 use gtk::prelude::TextBufferExt;
 use gtk::glib;
 
-use crate::keymap::{KeyEvent, KeymapResult, Mode};
+use crate::keymap::{canonicalize_key, KeyCode, KeyEvent, KeyModifiers, KeymapResult, Mode};
 
 use super::state::EditorState;
 
@@ -27,13 +27,13 @@ pub fn handle_key<B>(state: &mut EditorState, buffer: &B, mut key: KeyEvent) -> 
 where
     B: glib::object::IsA<gtk::TextBuffer>,
 {
-    crate::keymap::canonicalize_key(&mut key);
+    canonicalize_key(&mut key);
     let buffer = buffer.as_ref();
 
     // Esc or Ctrl-g: cancel any pending on_next_key, count, pending chords, selected register, and return to Normal mode.
-    let is_cancel = key.code == crate::keymap::trie::KeyCode::Esc
-        || (key.code == crate::keymap::trie::KeyCode::Char('g')
-            && key.modifiers.contains(crate::keymap::KeyModifiers::CONTROL));
+    let is_cancel = key.code == KeyCode::Esc
+        || (key.code == KeyCode::Char('g')
+            && key.modifiers.contains(KeyModifiers::CONTROL));
 
     if is_cancel {
         state.on_next_key = None;
@@ -66,7 +66,7 @@ where
 
     // Numerical counts in Normal / Select mode
     match (key, state.count) {
-        (KeyEvent { code: crate::keymap::trie::KeyCode::Char(c @ '0'..='9'), modifiers }, Some(cur_count))
+        (KeyEvent { code: KeyCode::Char(c @ '0'..='9'), modifiers }, Some(cur_count))
             if modifiers.is_empty() =>
         {
             let digit = c.to_digit(10).unwrap() as usize;
@@ -74,7 +74,7 @@ where
             state.count = std::num::NonZeroUsize::new(new_count.min(100_000_000));
             return KeyHandleResult::Stop;
         }
-        (KeyEvent { code: crate::keymap::trie::KeyCode::Char(c @ '1'..='9'), modifiers }, None)
+        (KeyEvent { code: KeyCode::Char(c @ '1'..='9'), modifiers }, None)
             if modifiers.is_empty() && !state.keymap.contains_key(state.mode, key) =>
         {
             let digit = c.to_digit(10).unwrap() as usize;
@@ -123,7 +123,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::keymap::{trie::KeyCode, KeyModifiers};
+    use crate::keymap::{KeyCode, KeyModifiers};
 
     fn buf_with(text: &str) -> gtk::TextBuffer {
         let b = gtk::TextBuffer::new(None);
@@ -439,7 +439,7 @@ mod tests {
         assert_eq!(after_line, before_line - 1, "k should go up one line");
         buf.place_cursor(&buf.iter_at_offset(pos as i32));
         let mut state2 = EditorState::new();
-        handle_key(&mut state2, &buf, KeyEvent { code: crate::keymap::trie::KeyCode::Up, modifiers: crate::keymap::trie::KeyModifiers::empty() });
+        handle_key(&mut state2, &buf, KeyEvent { code: KeyCode::Up, modifiers: KeyModifiers::empty() });
         let after_up = buf.iter_at_mark(&buf.get_insert()).line();
         assert_eq!(after_up, before_line - 1, "Up should go up");
     }
