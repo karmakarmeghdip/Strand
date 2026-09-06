@@ -28,77 +28,126 @@ pub fn handle_key<B>(state: &mut EditorState, buffer: &B, key: KeyEvent) -> KeyH
 where
     B: glib::object::IsA<gtk::TextBuffer>,
 {
-    let mode = state.mode;
+    let buffer = buffer.as_ref();
 
-    // Insert mode: passthrough everything except Esc and maybe C-g
-    if mode == Mode::Insert {
-        if key.code == crate::keymap::trie::KeyCode::Esc {
+    // Esc: cancel any pending on_next_key, count, pending chords, and return to Normal mode.
+    if key.code == crate::keymap::trie::KeyCode::Esc {
+        state.on_next_key = None;
+        state.count = None;
+        if !state.keymap.pending().is_empty() {
+            state.keymap.clear_pending();
+            return KeyHandleResult::Stop;
+        }
+        if state.mode == Mode::Insert || state.mode == Mode::Select {
             state.set_mode(Mode::Normal);
-            // Ensure selection collapsed when leaving insert
             let iter = buffer.iter_at_mark(&buffer.get_insert());
             buffer.place_cursor(&iter);
             return KeyHandleResult::ModeChanged(Mode::Normal);
         }
-        // Allow normal GTK insertion
+        return KeyHandleResult::Stop;
+    }
+
+    // Dynamic on_next_key callback (Helix style)
+    if let Some(cb) = state.on_next_key.take() {
+        return cb(state, buffer, key);
+    }
+
+    // Insert mode: passthrough everything
+    if state.mode == Mode::Insert {
         return KeyHandleResult::Propagate;
     }
 
-    let result = state.keymap.get(mode, key);
+    // Numerical counts in Normal / Select mode
+    match (key, state.count) {
+        (KeyEvent { code: crate::keymap::trie::KeyCode::Char(c @ '0'..='9'), modifiers }, Some(cur_count))
+            if modifiers.is_empty() =>
+        {
+            let digit = c.to_digit(10).unwrap() as usize;
+            let new_count = cur_count.get().saturating_mul(10).saturating_add(digit);
+            state.count = std::num::NonZeroUsize::new(new_count.min(100_000_000));
+            return KeyHandleResult::Stop;
+        }
+        (KeyEvent { code: crate::keymap::trie::KeyCode::Char(c @ '1'..='9'), modifiers }, None)
+            if modifiers.is_empty() && !state.keymap.contains_key(state.mode, key) =>
+        {
+            let digit = c.to_digit(10).unwrap() as usize;
+            state.count = std::num::NonZeroUsize::new(digit);
+            return KeyHandleResult::Stop;
+        }
+        _ => {}
+    }
+
+    let result = state.keymap.get(state.mode, key);
 
     match result {
         KeymapResult::Pending(_) => {
-            // Chord pending — consume, show which-key later (Phase 3)
+            // Chord pending — consume, keep count active
             KeyHandleResult::Stop
         }
         KeymapResult::Cancelled(_) => {
-            // Invalid chord — beep/cancel
+            // Invalid chord — reset count
+            state.count = None;
             KeyHandleResult::Stop
         }
         KeymapResult::NotFound => {
-            // In Normal/Select, unknown keys are swallowed to prevent insertion.
+            // In Normal/Select, unknown keys are swallowed to prevent insertion
+            state.count = None;
             KeyHandleResult::Stop
         }
-        KeymapResult::Matched(action) => execute_action(state, buffer, action),
+        KeymapResult::Matched(action) => {
+            let count = state.count.take().map_or(1, |c| c.get());
+            execute_action(state, buffer, action, count)
+        }
     }
 }
 
-fn execute_action<B>(state: &mut EditorState, buffer: &B, action: EditorAction) -> KeyHandleResult
-where
-    B: glib::object::IsA<gtk::TextBuffer>,
-{
+fn execute_action(
+    state: &mut EditorState,
+    buffer: &gtk::TextBuffer,
+    action: EditorAction,
+    count: usize,
+) -> KeyHandleResult {
     let extend = state.mode == Mode::Select;
 
     match action {
         EditorAction::MoveLeft => {
-            motions::move_horizontally(buffer, -1, extend);
+            motions::move_horizontally(buffer, -(count as i32), extend);
             KeyHandleResult::Stop
         }
         EditorAction::MoveRight => {
-            motions::move_horizontally(buffer, 1, extend);
+            motions::move_horizontally(buffer, count as i32, extend);
             KeyHandleResult::Stop
         }
         EditorAction::MoveUp => {
-            motions::move_vertically(buffer, -1, extend);
+            motions::move_vertically(buffer, -(count as i32), extend);
             KeyHandleResult::Stop
         }
         EditorAction::MoveDown => {
-            motions::move_vertically(buffer, 1, extend);
+            motions::move_vertically(buffer, count as i32, extend);
             KeyHandleResult::Stop
         }
         EditorAction::MoveWordForward => {
-            motions::move_word_forward(buffer, extend);
+            for _ in 0..count {
+                motions::move_word_forward(buffer, extend);
+            }
             KeyHandleResult::Stop
         }
         EditorAction::MoveWordBackward => {
-            motions::move_word_backward(buffer, extend);
+            for _ in 0..count {
+                motions::move_word_backward(buffer, extend);
+            }
             KeyHandleResult::Stop
         }
         EditorAction::MoveWordEnd => {
-            motions::move_word_end(buffer, extend);
+            for _ in 0..count {
+                motions::move_word_end(buffer, extend);
+            }
             KeyHandleResult::Stop
         }
         EditorAction::SelectLine => {
-            motions::select_line(buffer, extend);
+            for _ in 0..count {
+                motions::select_line(buffer, extend);
+            }
             KeyHandleResult::Stop
         }
         EditorAction::EnterInsert => {
@@ -106,7 +155,6 @@ where
             KeyHandleResult::ModeChanged(Mode::Insert)
         }
         EditorAction::EnterInsertAfter => {
-            // a: move right one then insert
             motions::move_horizontally(buffer, 1, false);
             state.set_mode(Mode::Insert);
             KeyHandleResult::ModeChanged(Mode::Insert)
@@ -123,27 +171,22 @@ where
         }
         EditorAction::EnterSelect => {
             if state.mode == Mode::Select {
-                // already in select — toggle to Normal and collapse
                 state.set_mode(Mode::Normal);
                 let iter = buffer.iter_at_mark(&buffer.get_insert());
                 buffer.place_cursor(&iter);
                 KeyHandleResult::ModeChanged(Mode::Normal)
             } else {
-                // Enter select: keep current selection as is, just change mode
-                // This mirrors Helix's select_mode — selection stays point until next motion extends
                 state.set_mode(Mode::Select);
                 KeyHandleResult::ModeChanged(Mode::Select)
             }
         }
         EditorAction::ExitToNormal => {
             state.set_mode(Mode::Normal);
-            // Collapse selection if in Select
             let iter = buffer.iter_at_mark(&buffer.get_insert());
             buffer.place_cursor(&iter);
             KeyHandleResult::ModeChanged(Mode::Normal)
         }
         EditorAction::DeleteSelection => {
-            // In Select, delete selection and go Normal. In Normal, delete char/line?
             motions::delete_selection(buffer);
             if state.mode == Mode::Select {
                 state.set_mode(Mode::Normal);
@@ -161,7 +204,6 @@ where
             if !txt.is_empty() {
                 state.clipboard = txt;
             }
-            // Yank in Select goes Normal (like Helix), in Normal stays.
             if state.mode == Mode::Select {
                 state.set_mode(Mode::Normal);
                 let iter = buffer.iter_at_mark(&buffer.get_insert());
@@ -172,17 +214,22 @@ where
         }
         EditorAction::PasteAfter => {
             let clip = state.clipboard.clone();
-            motions::paste_after(buffer, &clip);
+            for _ in 0..count {
+                motions::paste_after(buffer, &clip);
+            }
             KeyHandleResult::Stop
         }
         EditorAction::PasteBefore => {
-            // For Phase 2, same as after; proper before would insert at line start
             let clip = state.clipboard.clone();
-            motions::paste_after(buffer, &clip);
+            for _ in 0..count {
+                motions::paste_after(buffer, &clip);
+            }
             KeyHandleResult::Stop
         }
         EditorAction::Undo => {
-            motions::undo(buffer);
+            for _ in 0..count {
+                motions::undo(buffer);
+            }
             if state.mode == Mode::Select {
                 state.set_mode(Mode::Normal);
                 return KeyHandleResult::ModeChanged(Mode::Normal);
@@ -190,7 +237,9 @@ where
             KeyHandleResult::Stop
         }
         EditorAction::Redo => {
-            motions::redo(buffer);
+            for _ in 0..count {
+                motions::redo(buffer);
+            }
             if state.mode == Mode::Select {
                 state.set_mode(Mode::Normal);
                 return KeyHandleResult::ModeChanged(Mode::Normal);
@@ -201,36 +250,66 @@ where
             motions::match_brackets(buffer, state.last_matched_bracket, extend);
             KeyHandleResult::Stop
         }
-        EditorAction::SurroundAdd(ch) => {
-            motions::surround_add(buffer, ch);
-            if state.mode == Mode::Select {
-                state.set_mode(Mode::Normal);
-                return KeyHandleResult::ModeChanged(Mode::Normal);
-            }
+        EditorAction::SurroundAdd => {
+            state.on_next_key(|state, buffer, key| {
+                if let crate::keymap::trie::KeyCode::Char(ch) = key.code {
+                    motions::surround_add(buffer, ch);
+                    if state.mode == Mode::Select {
+                        state.set_mode(Mode::Normal);
+                        return KeyHandleResult::ModeChanged(Mode::Normal);
+                    }
+                }
+                KeyHandleResult::Stop
+            });
             KeyHandleResult::Stop
         }
-        EditorAction::SurroundDelete(ch) => {
-            motions::surround_delete(buffer, ch);
-            if state.mode == Mode::Select {
-                state.set_mode(Mode::Normal);
-                return KeyHandleResult::ModeChanged(Mode::Normal);
-            }
+        EditorAction::SurroundDelete => {
+            state.on_next_key(|state, buffer, key| {
+                if let crate::keymap::trie::KeyCode::Char(ch) = key.code {
+                    motions::surround_delete(buffer, ch);
+                    if state.mode == Mode::Select {
+                        state.set_mode(Mode::Normal);
+                        return KeyHandleResult::ModeChanged(Mode::Normal);
+                    }
+                }
+                KeyHandleResult::Stop
+            });
             KeyHandleResult::Stop
         }
-        EditorAction::SurroundReplace(from, to) => {
-            motions::surround_replace(buffer, from, to);
-            if state.mode == Mode::Select {
-                state.set_mode(Mode::Normal);
-                return KeyHandleResult::ModeChanged(Mode::Normal);
-            }
+        EditorAction::SurroundReplace => {
+            state.on_next_key(|_state, _buffer, key| {
+                if let crate::keymap::trie::KeyCode::Char(from) = key.code {
+                    _state.on_next_key(move |state, buffer, key2| {
+                        if let crate::keymap::trie::KeyCode::Char(to) = key2.code {
+                            motions::surround_replace(buffer, from, to);
+                            if state.mode == Mode::Select {
+                                state.set_mode(Mode::Normal);
+                                return KeyHandleResult::ModeChanged(Mode::Normal);
+                            }
+                        }
+                        KeyHandleResult::Stop
+                    });
+                }
+                KeyHandleResult::Stop
+            });
             KeyHandleResult::Stop
         }
-        EditorAction::SelectTextObjectAround(obj) => {
-            motions::select_textobject(buffer, obj, false);
+        EditorAction::SelectTextObjectAround => {
+            state.on_next_key(|_state, buffer, key| {
+                if let crate::keymap::trie::KeyCode::Char(obj) = key.code {
+                    motions::select_textobject(buffer, obj, false);
+                }
+                KeyHandleResult::Stop
+            });
             KeyHandleResult::Stop
         }
-        EditorAction::SelectTextObjectInner(obj) => {
-            motions::select_textobject(buffer, obj, true);
+        EditorAction::SelectTextObjectInner => {
+            state.on_next_key(|_state, buffer, key| {
+                if let crate::keymap::trie::KeyCode::Char(obj) = key.code {
+                    motions::select_textobject(buffer, obj, true);
+                }
+                KeyHandleResult::Stop
+            });
             KeyHandleResult::Stop
         }
         EditorAction::Noop => KeyHandleResult::Stop,
@@ -699,5 +778,151 @@ mod tests {
         assert_eq!(res2, KeyHandleResult::Stop);
         let (s2, e2) = buf.selection_bounds().unwrap();
         assert_eq!(buf.text(&s2, &e2, false).as_str(), "{ hello_world }");
+    }
+
+    #[test]
+    fn numerical_count_hjkl_motions() {
+        if !ensure_gtk() {
+            return;
+        }
+        let mut state = EditorState::new();
+        let buf = buf_with("line0\nline1\nline2\nline3\nline4\nline5\nline6\n");
+        buf.place_cursor(&buf.iter_at_offset(0));
+
+        // 5j -> down 5 lines (to line5)
+        handle_key(&mut state, &buf, KeyEvent::char('5'));
+        assert_eq!(state.count.map(|c| c.get()), Some(5));
+        let res = handle_key(&mut state, &buf, KeyEvent::char('j'));
+        assert_eq!(res, KeyHandleResult::Stop);
+        assert_eq!(state.count, None); // reset after execution
+        assert_eq!(buf.iter_at_mark(&buf.get_insert()).line(), 5);
+
+        // 3k -> up 3 lines (to line2)
+        handle_key(&mut state, &buf, KeyEvent::char('3'));
+        handle_key(&mut state, &buf, KeyEvent::char('k'));
+        assert_eq!(buf.iter_at_mark(&buf.get_insert()).line(), 2);
+
+        // 4l -> right 4 chars
+        handle_key(&mut state, &buf, KeyEvent::char('4'));
+        handle_key(&mut state, &buf, KeyEvent::char('l'));
+        assert_eq!(buf.iter_at_mark(&buf.get_insert()).line_offset(), 4);
+
+        // 2h -> left 2 chars
+        handle_key(&mut state, &buf, KeyEvent::char('2'));
+        handle_key(&mut state, &buf, KeyEvent::char('h'));
+        assert_eq!(buf.iter_at_mark(&buf.get_insert()).line_offset(), 2);
+    }
+
+    #[test]
+    fn numerical_count_multi_digit_and_reset() {
+        if !ensure_gtk() {
+            return;
+        }
+        let mut state = EditorState::new();
+        let buf = buf_with("abcdefghijklmnopqrstuvwxyz");
+        buf.place_cursor(&buf.iter_at_offset(0));
+
+        // 1, 2, l -> moves right 12 chars
+        handle_key(&mut state, &buf, KeyEvent::char('1'));
+        assert_eq!(state.count.map(|c| c.get()), Some(1));
+        handle_key(&mut state, &buf, KeyEvent::char('2'));
+        assert_eq!(state.count.map(|c| c.get()), Some(12));
+
+        let res = handle_key(&mut state, &buf, KeyEvent::char('l'));
+        assert_eq!(res, KeyHandleResult::Stop);
+        assert_eq!(state.count, None);
+        assert_eq!(buf.iter_at_mark(&buf.get_insert()).offset(), 12);
+
+        // Subsequent 'l' without count moves only 1 character
+        handle_key(&mut state, &buf, KeyEvent::char('l'));
+        assert_eq!(buf.iter_at_mark(&buf.get_insert()).offset(), 13);
+    }
+
+    #[test]
+    fn numerical_count_cancelled_by_esc() {
+        if !ensure_gtk() {
+            return;
+        }
+        let mut state = EditorState::new();
+        let buf = buf_with("line0\nline1\nline2\nline3\nline4\nline5\n");
+        buf.place_cursor(&buf.iter_at_offset(0));
+
+        // 5, then Esc -> cancels count
+        handle_key(&mut state, &buf, KeyEvent::char('5'));
+        assert_eq!(state.count.map(|c| c.get()), Some(5));
+
+        handle_key(&mut state, &buf, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+        assert_eq!(state.count, None);
+
+        // Next j moves only 1 line, not 5
+        handle_key(&mut state, &buf, KeyEvent::char('j'));
+        assert_eq!(buf.iter_at_mark(&buf.get_insert()).line(), 1);
+    }
+
+    #[test]
+    fn numerical_count_word_and_line_selection() {
+        if !ensure_gtk() {
+            return;
+        }
+        let mut state = EditorState::new();
+        let buf = buf_with("apple banana cherry date elderberry\nsecond line\nthird line\n");
+        buf.place_cursor(&buf.iter_at_offset(0));
+
+        // 3w -> advance 3 words (to 'date')
+        handle_key(&mut state, &buf, KeyEvent::char('3'));
+        handle_key(&mut state, &buf, KeyEvent::char('w'));
+        let (s, e) = buf.selection_bounds().unwrap();
+        assert_eq!(buf.text(&s, &e, false).as_str(), "date");
+
+        // 2x -> select 2 lines
+        buf.place_cursor(&buf.iter_at_offset(0));
+        handle_key(&mut state, &buf, KeyEvent::char('2'));
+        handle_key(&mut state, &buf, KeyEvent::char('x'));
+        let (s, e) = buf.selection_bounds().unwrap();
+        assert_eq!(
+            buf.text(&s, &e, false).as_str(),
+            "apple banana cherry date elderberry\nsecond line\n"
+        );
+    }
+
+    #[test]
+    fn dynamic_on_next_key_custom_chars() {
+        if !ensure_gtk() {
+            return;
+        }
+        let mut state = EditorState::new();
+        let buf = buf_with("target text");
+        state.set_mode(Mode::Select);
+        buf.select_range(&buf.iter_at_offset(0), &buf.iter_at_offset(6)); // select "target"
+
+        // ms* -> surround with '*'
+        handle_key(&mut state, &buf, KeyEvent::char('m'));
+        handle_key(&mut state, &buf, KeyEvent::char('s'));
+        let res = handle_key(&mut state, &buf, KeyEvent::char('*'));
+        assert_eq!(res, KeyHandleResult::ModeChanged(Mode::Normal));
+        assert_eq!(
+            buf.text(&buf.start_iter(), &buf.end_iter(), false).as_str(),
+            "*target* text"
+        );
+
+        // mr*# -> replace '*' with '#'
+        buf.place_cursor(&buf.iter_at_offset(4)); // inside *target*
+        handle_key(&mut state, &buf, KeyEvent::char('m'));
+        handle_key(&mut state, &buf, KeyEvent::char('r'));
+        handle_key(&mut state, &buf, KeyEvent::char('*'));
+        handle_key(&mut state, &buf, KeyEvent::char('#'));
+        assert_eq!(
+            buf.text(&buf.start_iter(), &buf.end_iter(), false).as_str(),
+            "#target# text"
+        );
+
+        // md# -> delete '#'
+        handle_key(&mut state, &buf, KeyEvent::char('m'));
+        handle_key(&mut state, &buf, KeyEvent::char('d'));
+        handle_key(&mut state, &buf, KeyEvent::char('#'));
+        assert_eq!(
+            buf.text(&buf.start_iter(), &buf.end_iter(), false).as_str(),
+            "target text"
+        );
     }
 }

@@ -67,32 +67,32 @@ src/components/                         helix-term/ui/ & compositor.rs
 ### Phase 2: Core Primitives Decomposition (Mirroring `helix-core`)
 *Goal: Break the 1600-line `motions.rs` monolith into single-responsibility modules matching Helix's core.*
 
-- [ ] **2.1 Extract character classification (`src/core/chars.rs`)**
+- [x] **2.1 Extract character classification (`src/core/chars.rs`)**
   - **Priority**: P1
   - **Dependencies**: 1.2
   - **Details**: Extract `CharCategory`, `categorize`, `is_word_boundary`, `is_long_word_boundary` into a dedicated module. Mirror `helix-core/src/chars.rs`.
 
-- [ ] **2.2 Formalize Selection Range abstraction (`src/core/selection.rs`)**
+- [x] **2.2 Formalize Selection Range abstraction (`src/core/selection.rs`)**
   - **Priority**: P1
   - **Dependencies**: 2.1
   - **Details**: Formalize `Range` with `anchor`, `head`, and directionality over `GtkTextIter`, maintaining block-cursor semantics. Mirror `helix-core/src/selection.rs`.
 
-- [ ] **2.3 Extract motion engine (`src/core/movement.rs`)**
+- [x] **2.3 Extract motion engine (`src/core/movement.rs`)**
   - **Priority**: P1
   - **Dependencies**: 2.1, 2.2
   - **Details**: Extract `move_horizontally`, `move_vertically`, `move_word_forward`, `move_word_backward`, `move_word_end`, `move_long_word_forward`, and `select_line`. Mirror `helix-core/src/movement.rs`.
 
-- [ ] **2.4 Extract textobjects (`src/core/textobject.rs`)**
+- [x] **2.4 Extract textobjects (`src/core/textobject.rs`)**
   - **Priority**: P1
   - **Dependencies**: 2.1, 2.2
   - **Details**: Extract `select_textobject` (words, WORDs, paragraphs, brackets, quotes) with inside/around modes. Mirror `helix-core/src/textobject.rs`.
 
-- [ ] **2.5 Extract surround operations (`src/core/surround.rs`)**
+- [x] **2.5 Extract surround operations (`src/core/surround.rs`)**
   - **Priority**: P1
   - **Dependencies**: 2.2
   - **Details**: Extract `surround_add`, `surround_delete`, `surround_replace`. Mirror `helix-core/src/surround.rs`.
 
-- [ ] **2.6 Extract bracket matching (`src/core/match_brackets.rs`)**
+- [x] **2.6 Extract bracket matching (`src/core/match_brackets.rs`)**
   - **Priority**: P1
   - **Dependencies**: 2.2
   - **Details**: Extract `match_brackets`, bracket pairs lookup, and syntax/comment-aware skipping. Mirror `helix-core/src/match_brackets.rs`.
@@ -102,7 +102,7 @@ src/components/                         helix-term/ui/ & compositor.rs
 ### Phase 3: Keymap Decoupling & Helix Ergonomics (Counts & Pure Chords)
 *Goal: Remove editor-specific `CatchAll` from generic KeyTrie, introduce numerical count prefixes (`5j`, `3w`).*
 
-- [ ] **3.1 Clean `KeyTrie` and remove `CatchAll` enum**
+- [x] **3.1 Clean `KeyTrie` and remove `CatchAll` enum**
   - **Priority**: P1
   - **Dependencies**: Phase 2
   - **Files**: `src/keymap/trie.rs`
@@ -110,7 +110,7 @@ src/components/                         helix-term/ui/ & compositor.rs
     - Remove `pub catch_all: Option<CatchAll>` and editor-specific logic from `KeyTrieNode`.
     - Implement pure nested tries or `on_next_key` callbacks for multi-step chords (`r<char>`, `f<char>`, `ms<char>`).
 
-- [ ] **3.2 Implement numerical count prefixing (`count: Option<NonZeroUsize>`)**
+- [x] **3.2 Implement numerical count prefixing (`count: Option<NonZeroUsize>`)**
   - **Priority**: P1
   - **Dependencies**: 3.1
   - **Details**:

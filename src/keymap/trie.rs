@@ -177,16 +177,6 @@ impl std::str::FromStr for KeyEvent {
 // Trie
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CatchAll {
-    SurroundAdd,
-    SurroundDelete,
-    SurroundReplaceFirst,
-    SurroundReplaceSecond(char),
-    TextObjectAround,
-    TextObjectInner,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KeyTrie {
     Leaf(EditorAction),
@@ -198,7 +188,6 @@ pub struct KeyTrieNode {
     pub name: String,
     pub map: HashMap<KeyEvent, KeyTrie>,
     pub is_sticky: bool,
-    pub catch_all: Option<CatchAll>,
 }
 
 impl KeyTrieNode {
@@ -207,7 +196,6 @@ impl KeyTrieNode {
             name: name.to_string(),
             map: HashMap::new(),
             is_sticky: false,
-            catch_all: None,
         }
     }
 
@@ -228,37 +216,7 @@ impl KeyTrie {
         let mut cur = self.clone();
         for k in keys {
             cur = match cur {
-                KeyTrie::Node(node) => {
-                    if let Some(child) = node.map.get(k) {
-                        child.clone()
-                    } else if let Some(catch_all) = node.catch_all {
-                        match (catch_all, k.code) {
-                            (CatchAll::SurroundAdd, KeyCode::Char(c)) => {
-                                KeyTrie::Leaf(EditorAction::SurroundAdd(c))
-                            }
-                            (CatchAll::SurroundDelete, KeyCode::Char(c)) => {
-                                KeyTrie::Leaf(EditorAction::SurroundDelete(c))
-                            }
-                            (CatchAll::SurroundReplaceFirst, KeyCode::Char(c)) => {
-                                let mut next_node = KeyTrieNode::new(&format!("Replace {c} with"));
-                                next_node.catch_all = Some(CatchAll::SurroundReplaceSecond(c));
-                                KeyTrie::Node(next_node)
-                            }
-                            (CatchAll::SurroundReplaceSecond(from), KeyCode::Char(to)) => {
-                                KeyTrie::Leaf(EditorAction::SurroundReplace(from, to))
-                            }
-                            (CatchAll::TextObjectAround, KeyCode::Char(c)) => {
-                                KeyTrie::Leaf(EditorAction::SelectTextObjectAround(c))
-                            }
-                            (CatchAll::TextObjectInner, KeyCode::Char(c)) => {
-                                KeyTrie::Leaf(EditorAction::SelectTextObjectInner(c))
-                            }
-                            _ => return None,
-                        }
-                    } else {
-                        return None;
-                    }
-                }
+                KeyTrie::Node(node) => node.map.get(k)?.clone(),
                 KeyTrie::Leaf(_) => return None,
             };
         }
@@ -359,15 +317,28 @@ impl KeyTrieRoot {
     pub fn clear_pending(&mut self) {
         self.pending.clear();
     }
+
+    pub fn contains_key(&self, mode: Mode, key: KeyEvent) -> bool {
+        if let Some(ref sticky_node) = self.sticky {
+            if sticky_node.map.contains_key(&key) {
+                return true;
+            }
+        }
+        if let Some(KeyTrie::Node(node)) = self.map.get(&mode) {
+            node.map.contains_key(&key)
+        } else {
+            false
+        }
+    }
 }
 
 /// Build the Helix-style Match (`m`) submap:
 /// - `mm` -> goto matching bracket
-/// - `ms<char>` -> surround selection
-/// - `mr<from><to>` -> replace surround pair
-/// - `md<char>` -> delete surround pair ('m' for closest)
-/// - `ma<object>` -> select around textobject ('w', 'W', 'p', 'm', brackets, quotes)
-/// - `mi<object>` -> select inside textobject ('w', 'W', 'p', 'm', brackets, quotes)
+/// - `ms` -> surround selection (waits for char via on_next_key)
+/// - `mr` -> replace surround pair (waits for from/to via on_next_key)
+/// - `md` -> delete surround pair (waits for char via on_next_key)
+/// - `ma` -> select around textobject (waits for obj via on_next_key)
+/// - `mi` -> select inside textobject (waits for obj via on_next_key)
 pub fn build_match_node() -> KeyTrieNode {
     let mut match_node = KeyTrieNode::new("Match");
     let leaf = |a| KeyTrie::Leaf(a);
@@ -376,58 +347,19 @@ pub fn build_match_node() -> KeyTrieNode {
     match_node.insert(KeyEvent::char('m'), leaf(EditorAction::MatchBrackets));
 
     // ms -> surround_add
-    let mut surround_add_node = KeyTrieNode::new("Surround add");
-    surround_add_node.catch_all = Some(CatchAll::SurroundAdd);
-    for ch in ['(', ')', '[', ']', '{', '}', '<', '>', '"', '\'', '`'] {
-        surround_add_node.insert(KeyEvent::char(ch), leaf(EditorAction::SurroundAdd(ch)));
-    }
-    match_node.insert(KeyEvent::char('s'), KeyTrie::Node(surround_add_node));
+    match_node.insert(KeyEvent::char('s'), leaf(EditorAction::SurroundAdd));
 
     // md -> surround_delete
-    let mut surround_del_node = KeyTrieNode::new("Surround delete");
-    surround_del_node.catch_all = Some(CatchAll::SurroundDelete);
-    surround_del_node.insert(KeyEvent::char('m'), leaf(EditorAction::SurroundDelete('m')));
-    for ch in ['(', ')', '[', ']', '{', '}', '<', '>', '"', '\'', '`'] {
-        surround_del_node.insert(KeyEvent::char(ch), leaf(EditorAction::SurroundDelete(ch)));
-    }
-    match_node.insert(KeyEvent::char('d'), KeyTrie::Node(surround_del_node));
+    match_node.insert(KeyEvent::char('d'), leaf(EditorAction::SurroundDelete));
 
     // mr -> surround_replace
-    let mut surround_rep_node = KeyTrieNode::new("Surround replace");
-    surround_rep_node.catch_all = Some(CatchAll::SurroundReplaceFirst);
-    for from in ['m', '(', ')', '[', ']', '{', '}', '<', '>', '"', '\'', '`'] {
-        let mut rep_target = KeyTrieNode::new(&format!("Replace {from} with"));
-        rep_target.catch_all = Some(CatchAll::SurroundReplaceSecond(from));
-        for to in ['(', ')', '[', ']', '{', '}', '<', '>', '"', '\'', '`'] {
-            rep_target.insert(KeyEvent::char(to), leaf(EditorAction::SurroundReplace(from, to)));
-        }
-        surround_rep_node.insert(KeyEvent::char(from), KeyTrie::Node(rep_target));
-    }
-    match_node.insert(KeyEvent::char('r'), KeyTrie::Node(surround_rep_node));
+    match_node.insert(KeyEvent::char('r'), leaf(EditorAction::SurroundReplace));
 
     // ma -> select_textobject_around
-    let mut around_node = KeyTrieNode::new("Match around");
-    around_node.catch_all = Some(CatchAll::TextObjectAround);
-    around_node.insert(KeyEvent::char('w'), leaf(EditorAction::SelectTextObjectAround('w')));
-    around_node.insert(KeyEvent::char('W'), leaf(EditorAction::SelectTextObjectAround('W')));
-    around_node.insert(KeyEvent::char('p'), leaf(EditorAction::SelectTextObjectAround('p')));
-    around_node.insert(KeyEvent::char('m'), leaf(EditorAction::SelectTextObjectAround('m')));
-    for ch in ['(', ')', '[', ']', '{', '}', '<', '>', '"', '\'', '`'] {
-        around_node.insert(KeyEvent::char(ch), leaf(EditorAction::SelectTextObjectAround(ch)));
-    }
-    match_node.insert(KeyEvent::char('a'), KeyTrie::Node(around_node));
+    match_node.insert(KeyEvent::char('a'), leaf(EditorAction::SelectTextObjectAround));
 
     // mi -> select_textobject_inner
-    let mut inner_node = KeyTrieNode::new("Match inside");
-    inner_node.catch_all = Some(CatchAll::TextObjectInner);
-    inner_node.insert(KeyEvent::char('w'), leaf(EditorAction::SelectTextObjectInner('w')));
-    inner_node.insert(KeyEvent::char('W'), leaf(EditorAction::SelectTextObjectInner('W')));
-    inner_node.insert(KeyEvent::char('p'), leaf(EditorAction::SelectTextObjectInner('p')));
-    inner_node.insert(KeyEvent::char('m'), leaf(EditorAction::SelectTextObjectInner('m')));
-    for ch in ['(', ')', '[', ']', '{', '}', '<', '>', '"', '\'', '`'] {
-        inner_node.insert(KeyEvent::char(ch), leaf(EditorAction::SelectTextObjectInner(ch)));
-    }
-    match_node.insert(KeyEvent::char('i'), KeyTrie::Node(inner_node));
+    match_node.insert(KeyEvent::char('i'), leaf(EditorAction::SelectTextObjectInner));
 
     match_node
 }
@@ -853,59 +785,38 @@ mod tests {
         let res2 = trie.get(Mode::Normal, KeyEvent::char('m'));
         assert_eq!(res2, KeymapResult::Matched(EditorAction::MatchBrackets));
 
-        // ms( -> SurroundAdd('(')
+        // ms -> SurroundAdd
         let _ = trie.get(Mode::Normal, KeyEvent::char('m'));
-        let _ = trie.get(Mode::Normal, KeyEvent::char('s'));
-        let res_ms = trie.get(Mode::Normal, KeyEvent::char('('));
-        assert_eq!(res_ms, KeymapResult::Matched(EditorAction::SurroundAdd('(')));
+        let res_ms = trie.get(Mode::Normal, KeyEvent::char('s'));
+        assert_eq!(res_ms, KeymapResult::Matched(EditorAction::SurroundAdd));
 
-        // ms* -> SurroundAdd('*') via catch_all
+        // md -> SurroundDelete
         let _ = trie.get(Mode::Normal, KeyEvent::char('m'));
-        let _ = trie.get(Mode::Normal, KeyEvent::char('s'));
-        let res_ms_star = trie.get(Mode::Normal, KeyEvent::char('*'));
-        assert_eq!(res_ms_star, KeymapResult::Matched(EditorAction::SurroundAdd('*')));
+        let res_md = trie.get(Mode::Normal, KeyEvent::char('d'));
+        assert_eq!(res_md, KeymapResult::Matched(EditorAction::SurroundDelete));
 
-        // md( -> SurroundDelete('(')
+        // mr -> SurroundReplace
         let _ = trie.get(Mode::Normal, KeyEvent::char('m'));
-        let _ = trie.get(Mode::Normal, KeyEvent::char('d'));
-        let res_md = trie.get(Mode::Normal, KeyEvent::char('('));
-        assert_eq!(res_md, KeymapResult::Matched(EditorAction::SurroundDelete('(')));
+        let res_mr = trie.get(Mode::Normal, KeyEvent::char('r'));
+        assert_eq!(res_mr, KeymapResult::Matched(EditorAction::SurroundReplace));
 
-        // mdm -> SurroundDelete('m') (closest pair)
+        // ma -> SelectTextObjectAround
         let _ = trie.get(Mode::Normal, KeyEvent::char('m'));
-        let _ = trie.get(Mode::Normal, KeyEvent::char('d'));
-        let res_mdm = trie.get(Mode::Normal, KeyEvent::char('m'));
-        assert_eq!(res_mdm, KeymapResult::Matched(EditorAction::SurroundDelete('m')));
+        let res_ma = trie.get(Mode::Normal, KeyEvent::char('a'));
+        assert_eq!(res_ma, KeymapResult::Matched(EditorAction::SelectTextObjectAround));
 
-        // mr([ -> SurroundReplace('(', '[')
+        // mi -> SelectTextObjectInner
         let _ = trie.get(Mode::Normal, KeyEvent::char('m'));
-        let _ = trie.get(Mode::Normal, KeyEvent::char('r'));
-        let _ = trie.get(Mode::Normal, KeyEvent::char('('));
-        let res_mr = trie.get(Mode::Normal, KeyEvent::char('['));
-        assert_eq!(res_mr, KeymapResult::Matched(EditorAction::SurroundReplace('(', '[')));
-
-        // mrm[ -> SurroundReplace('m', '[')
-        let _ = trie.get(Mode::Normal, KeyEvent::char('m'));
-        let _ = trie.get(Mode::Normal, KeyEvent::char('r'));
-        let _ = trie.get(Mode::Normal, KeyEvent::char('m'));
-        let res_mrm = trie.get(Mode::Normal, KeyEvent::char('['));
-        assert_eq!(res_mrm, KeymapResult::Matched(EditorAction::SurroundReplace('m', '[')));
-
-        // maw -> SelectTextObjectAround('w')
-        let _ = trie.get(Mode::Normal, KeyEvent::char('m'));
-        let _ = trie.get(Mode::Normal, KeyEvent::char('a'));
-        let res_maw = trie.get(Mode::Normal, KeyEvent::char('w'));
-        assert_eq!(res_maw, KeymapResult::Matched(EditorAction::SelectTextObjectAround('w')));
-
-        // mi( -> SelectTextObjectInner('(')
-        let _ = trie.get(Mode::Normal, KeyEvent::char('m'));
-        let _ = trie.get(Mode::Normal, KeyEvent::char('i'));
-        let res_mi = trie.get(Mode::Normal, KeyEvent::char('('));
-        assert_eq!(res_mi, KeymapResult::Matched(EditorAction::SelectTextObjectInner('(')));
+        let res_mi = trie.get(Mode::Normal, KeyEvent::char('i'));
+        assert_eq!(res_mi, KeymapResult::Matched(EditorAction::SelectTextObjectInner));
 
         // Works in Select mode too
         let _ = trie.get(Mode::Select, KeyEvent::char('m'));
         let res_sel_mm = trie.get(Mode::Select, KeyEvent::char('m'));
         assert_eq!(res_sel_mm, KeymapResult::Matched(EditorAction::MatchBrackets));
+
+        let _ = trie.get(Mode::Select, KeyEvent::char('m'));
+        let res_sel_ms = trie.get(Mode::Select, KeyEvent::char('s'));
+        assert_eq!(res_sel_ms, KeymapResult::Matched(EditorAction::SurroundAdd));
     }
 }

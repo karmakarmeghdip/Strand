@@ -1,11 +1,17 @@
 #![allow(dead_code)]
-use crate::keymap::{default_keymap, KeyTrieRoot, Mode};
+use std::num::NonZeroUsize;
+use crate::components::editor::controller::KeyHandleResult;
+use crate::keymap::{default_keymap, KeyEvent, KeyTrieRoot, Mode};
+
+pub type OnKeyCallback = Box<dyn FnOnce(&mut EditorState, &gtk::TextBuffer, KeyEvent) -> KeyHandleResult>;
 
 pub struct EditorState {
     pub mode: Mode,
     pub clipboard: String,
     pub keymap: KeyTrieRoot,
     pub last_matched_bracket: Option<i32>,
+    pub count: Option<NonZeroUsize>,
+    pub on_next_key: Option<OnKeyCallback>,
 }
 
 impl EditorState {
@@ -15,6 +21,8 @@ impl EditorState {
             clipboard: String::new(),
             keymap: KeyTrieRoot::new(default_keymap()),
             last_matched_bracket: None,
+            count: None,
+            on_next_key: None,
         }
     }
 
@@ -27,6 +35,15 @@ impl EditorState {
         self.keymap.clear_pending();
         self.keymap.sticky = None;
         self.last_matched_bracket = None;
+        self.count = None;
+        self.on_next_key = None;
+    }
+
+    pub fn on_next_key<F>(&mut self, f: F)
+    where
+        F: FnOnce(&mut EditorState, &gtk::TextBuffer, KeyEvent) -> KeyHandleResult + 'static,
+    {
+        self.on_next_key = Some(Box::new(f));
     }
 }
 

@@ -53,11 +53,11 @@ pub enum EditorAction {
 
     // Match actions (m prefix)
     MatchBrackets,
-    SurroundAdd(char),
-    SurroundDelete(char),
-    SurroundReplace(char, char),
-    SelectTextObjectAround(char),
-    SelectTextObjectInner(char),
+    SurroundAdd,
+    SurroundDelete,
+    SurroundReplace,
+    SelectTextObjectAround,
+    SelectTextObjectInner,
 
     // Structural / palette
     Noop,
@@ -88,11 +88,11 @@ impl EditorAction {
             Self::Undo => "undo change",
             Self::Redo => "redo change",
             Self::MatchBrackets => "goto matching bracket",
-            Self::SurroundAdd(_) => "surround selection",
-            Self::SurroundDelete(_) => "delete surround pair",
-            Self::SurroundReplace(_, _) => "replace surround pair",
-            Self::SelectTextObjectAround(_) => "select around textobject",
-            Self::SelectTextObjectInner(_) => "select inside textobject",
+            Self::SurroundAdd => "surround selection",
+            Self::SurroundDelete => "delete surround pair",
+            Self::SurroundReplace => "replace surround pair",
+            Self::SelectTextObjectAround => "select around textobject",
+            Self::SelectTextObjectInner => "select inside textobject",
             Self::Noop => "no operation",
         }
     }

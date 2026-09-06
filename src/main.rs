@@ -1,5 +1,6 @@
 mod app;
 mod components;
+pub mod core;
 mod keymap;
 
 use relm4::RelmApp;
