@@ -158,18 +158,22 @@ impl std::str::FromStr for KeyEvent {
             }
         }
 
-        // Normalize S- handling for char keys: S-w => W
-        let mut code = code;
-        if let KeyCode::Char(ch) = code {
-            if ch.is_ascii_lowercase() && modifiers.contains(KeyModifiers::SHIFT) {
-                code = KeyCode::Char(ch.to_ascii_uppercase());
-                modifiers.remove(KeyModifiers::SHIFT);
-            } else if ch.is_ascii_uppercase() {
-                modifiers.remove(KeyModifiers::SHIFT);
-            }
-        }
+        let mut event = KeyEvent { code, modifiers };
+        canonicalize_key(&mut event);
+        Ok(event)
+    }
+}
 
-        Ok(KeyEvent { code, modifiers })
+/// Canonicalize key event according to Helix rules:
+/// Character keys have SHIFT modifier stripped because the character itself already reflects
+/// whether shift was pressed (e.g. '"', 'A', ':', '+'). If a lowercase char has SHIFT,
+/// it is converted to uppercase.
+pub fn canonicalize_key(key: &mut KeyEvent) {
+    if let KeyCode::Char(ch) = key.code {
+        if ch.is_ascii_lowercase() && key.modifiers.contains(KeyModifiers::SHIFT) {
+            key.code = KeyCode::Char(ch.to_ascii_uppercase());
+        }
+        key.modifiers.remove(KeyModifiers::SHIFT);
     }
 }
 
@@ -364,13 +368,26 @@ pub fn build_match_node() -> KeyTrieNode {
     match_node
 }
 
+/// Helper to construct Helix space mode node:
+/// - `y` -> yank to system clipboard
+/// - `p` -> paste system clipboard after
+/// - `P` -> paste system clipboard before
+pub fn build_space_node() -> KeyTrieNode {
+    let mut space_node = KeyTrieNode::new("Space");
+    let leaf = |a| KeyTrie::Leaf(a);
+    space_node.insert(KeyEvent::char('y'), leaf(EditorAction::YankToClipboard));
+    space_node.insert(KeyEvent::char('p'), leaf(EditorAction::PasteClipboardAfter));
+    space_node.insert(KeyEvent::char('P'), leaf(EditorAction::PasteClipboardBefore));
+    space_node
+}
+
 /// Build the default Phase-2 keymap.
 ///
 /// Normal:
 ///   h/j/k/l, w/b/e, x, i, d/c/y/p, v, Esc
 ///   g -> goto node (g g = file start, g e = file end for demo; extensible)
 ///   m -> match node (mm = match brackets, ms = surround add, mr = replace, md = delete, ma/mi = textobjects)
-///   Space -> space node (placeholder for which-key phase 3)
+///   Space -> space node (y = yank to clipboard, p/P = paste from clipboard)
 /// Insert:
 ///   Esc -> normal
 /// Select:
@@ -402,6 +419,7 @@ pub fn default_keymap() -> HashMap<Mode, KeyTrie> {
     normal.insert(KeyEvent::char('p'), leaf(EditorAction::PasteAfter));
     normal.insert(KeyEvent::char('u'), leaf(EditorAction::Undo));
     normal.insert(KeyEvent::char('U'), leaf(EditorAction::Redo));
+    normal.insert(KeyEvent::char('"'), leaf(EditorAction::SelectRegister));
     // Esc handled specially in get().
 
     // g prefix
@@ -413,17 +431,13 @@ pub fn default_keymap() -> HashMap<Mode, KeyTrie> {
     // m prefix (Helix match mode)
     normal.insert(KeyEvent::char('m'), KeyTrie::Node(build_match_node()));
 
-    // Space prefix (which-key placeholder)
-    let mut space_node = KeyTrieNode::new("Space");
-    // Space f / Space b etc will be added in Phase 3/4.
-    // For now leave empty node to test pending.
-    let _ = space_node; // keep empty to produce Pending on Space
+    // Space prefix (Helix clipboard and which-key)
     normal.insert(
         KeyEvent {
             code: KeyCode::Char(' '),
             modifiers: KeyModifiers::empty(),
         },
-        KeyTrie::Node(space_node),
+        KeyTrie::Node(build_space_node()),
     );
 
     // Arrow keys also work
@@ -467,6 +481,7 @@ pub fn default_keymap() -> HashMap<Mode, KeyTrie> {
     select.insert(KeyEvent::char('d'), leaf(EditorAction::DeleteSelection));
     select.insert(KeyEvent::char('c'), leaf(EditorAction::ChangeSelection));
     select.insert(KeyEvent::char('y'), leaf(EditorAction::YankSelection));
+    select.insert(KeyEvent::char('"'), leaf(EditorAction::SelectRegister));
     select.insert(
         KeyEvent::new(KeyCode::Left, KeyModifiers::empty()),
         leaf(EditorAction::MoveLeft),
@@ -485,6 +500,14 @@ pub fn default_keymap() -> HashMap<Mode, KeyTrie> {
     );
     // m prefix also available in Select mode
     select.insert(KeyEvent::char('m'), KeyTrie::Node(build_match_node()));
+    // Space prefix also available in Select mode
+    select.insert(
+        KeyEvent {
+            code: KeyCode::Char(' '),
+            modifiers: KeyModifiers::empty(),
+        },
+        KeyTrie::Node(build_space_node()),
+    );
     m.insert(Mode::Select, KeyTrie::Node(select));
 
     m
@@ -524,6 +547,7 @@ pub fn gdk_to_key_event(keyval: u32, state: u32) -> Option<KeyEvent> {
     const GDK_KEY_KP_Enter: u32 = 0xff8d;
     const GDK_KEY_BackSpace: u32 = 0xff08;
     const GDK_KEY_Tab: u32 = 0xff09;
+    const GDK_KEY_ISO_Left_Tab: u32 = 0xfe20;
     const GDK_KEY_Delete: u32 = 0xffff;
     const GDK_KEY_Left: u32 = 0xff51;
     const GDK_KEY_Right: u32 = 0xff53;
@@ -538,7 +562,7 @@ pub fn gdk_to_key_event(keyval: u32, state: u32) -> Option<KeyEvent> {
         GDK_KEY_Escape => KeyCode::Esc,
         GDK_KEY_Return | GDK_KEY_KP_Enter => KeyCode::Enter,
         GDK_KEY_BackSpace => KeyCode::Backspace,
-        GDK_KEY_Tab => KeyCode::Tab,
+        GDK_KEY_Tab | GDK_KEY_ISO_Left_Tab => KeyCode::Tab,
         GDK_KEY_Delete => KeyCode::Delete,
         GDK_KEY_Left => KeyCode::Left,
         GDK_KEY_Right => KeyCode::Right,
@@ -562,26 +586,12 @@ pub fn gdk_to_key_event(keyval: u32, state: u32) -> Option<KeyEvent> {
         }
     };
 
-    // Normalize: S handling for Char as in FromStr
-    let mut code = code;
-    let mut mods_norm = mods;
-    if let KeyCode::Char(ch) = code {
-        if ch.is_ascii_lowercase() && mods.contains(KeyModifiers::SHIFT) {
-            code = KeyCode::Char(ch.to_ascii_uppercase());
-            mods_norm.remove(KeyModifiers::SHIFT);
-        } else if ch.is_ascii_uppercase() {
-            mods_norm.remove(KeyModifiers::SHIFT);
-        }
-        // Space etc should not retain SHIFT.
-        if ch == ' ' {
-            mods_norm.remove(KeyModifiers::SHIFT);
-        }
-    }
-
-    Some(KeyEvent {
+    let mut event = KeyEvent {
         code,
-        modifiers: mods_norm,
-    })
+        modifiers: mods,
+    };
+    canonicalize_key(&mut event);
+    Some(event)
 }
 
 /// Wrapper that accepts `gdk::Key` + `gdk::ModifierType` (used in `app.rs`).
@@ -772,6 +782,12 @@ mod tests {
         assert_eq!(ev_u, KeyEvent::char('u'));
         let ev_cap_u = gdk_to_key_event('U' as u32, SHIFT_MASK).unwrap();
         assert_eq!(ev_cap_u, KeyEvent::char('U'));
+        let ev_quote = gdk_to_key_event('"' as u32, SHIFT_MASK).unwrap();
+        assert_eq!(ev_quote, KeyEvent::char('"'));
+        let ev_colon = gdk_to_key_event(':' as u32, SHIFT_MASK).unwrap();
+        assert_eq!(ev_colon, KeyEvent::char(':'));
+        let ev_plus = gdk_to_key_event('+' as u32, SHIFT_MASK).unwrap();
+        assert_eq!(ev_plus, KeyEvent::char('+'));
     }
 
     #[test]

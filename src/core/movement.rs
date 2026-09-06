@@ -456,7 +456,13 @@ pub fn yank_selection(buffer: &impl IsA<TextBuffer>) -> String {
     if let Some((start, end)) = buffer.selection_bounds() {
         buffer.text(&start, &end, false).to_string()
     } else {
-        String::new()
+        let start = buffer.iter_at_mark(&buffer.get_insert());
+        let mut end = start;
+        if end.forward_cursor_position() {
+            buffer.text(&start, &end, false).to_string()
+        } else {
+            String::new()
+        }
     }
 }
 
@@ -616,6 +622,11 @@ mod tests {
         assert_eq!(buf.text(&buf.start_iter(), &buf.end_iter(), false).as_str(), " world");
         paste_after(&buf, "big");
         assert_eq!(buf.text(&buf.start_iter(), &buf.end_iter(), false).as_str(), "big world");
+
+        // Point-cursor yank
+        buf.place_cursor(&buf.iter_at_offset(0));
+        let yanked_char = yank_selection(&buf);
+        assert_eq!(yanked_char, "b");
     }
 
     #[test]

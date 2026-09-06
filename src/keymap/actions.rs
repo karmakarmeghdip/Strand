@@ -58,6 +58,10 @@ pub enum EditorAction {
     SurroundReplace,
     SelectTextObjectAround,
     SelectTextObjectInner,
+    SelectRegister,       // " — select register
+    YankToClipboard,      // <space>y — yank to system clipboard
+    PasteClipboardAfter,  // <space>p — paste system clipboard after
+    PasteClipboardBefore, // <space>P — paste system clipboard before
 
     // Structural / palette
     Noop,
@@ -93,6 +97,10 @@ impl EditorAction {
             Self::SurroundReplace => "replace surround pair",
             Self::SelectTextObjectAround => "select around textobject",
             Self::SelectTextObjectInner => "select inside textobject",
+            Self::SelectRegister => "select register",
+            Self::YankToClipboard => "yank to clipboard",
+            Self::PasteClipboardAfter => "paste clipboard after",
+            Self::PasteClipboardBefore => "paste clipboard before",
             Self::Noop => "no operation",
         }
     }

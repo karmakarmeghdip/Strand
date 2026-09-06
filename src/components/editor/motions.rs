@@ -2,4 +2,5 @@
 //!
 //! Re-exports from `crate::core` for backwards compatibility with existing components.
 
+#[allow(unused_imports)]
 pub use crate::core::*;

@@ -2,9 +2,8 @@
 use gtk::prelude::TextBufferExt;
 use gtk::glib;
 
-use crate::keymap::{EditorAction, KeyEvent, KeymapResult, Mode};
+use crate::keymap::{KeyEvent, KeymapResult, Mode};
 
-use super::motions;
 use super::state::EditorState;
 
 /// Result of handling a key in CAPTURE phase.
@@ -24,16 +23,18 @@ pub enum KeyHandleResult {
 /// Mutates `buffer` directly via `GtkTextIter` (fast path) and
 /// `state` for mode/clipboard/pending trie.
 /// Never sends via Relm4 for per-keystroke motions.
-pub fn handle_key<B>(state: &mut EditorState, buffer: &B, key: KeyEvent) -> KeyHandleResult
+pub fn handle_key<B>(state: &mut EditorState, buffer: &B, mut key: KeyEvent) -> KeyHandleResult
 where
     B: glib::object::IsA<gtk::TextBuffer>,
 {
+    crate::keymap::canonicalize_key(&mut key);
     let buffer = buffer.as_ref();
 
-    // Esc: cancel any pending on_next_key, count, pending chords, and return to Normal mode.
+    // Esc: cancel any pending on_next_key, count, pending chords, selected register, and return to Normal mode.
     if key.code == crate::keymap::trie::KeyCode::Esc {
         state.on_next_key = None;
         state.count = None;
+        state.selected_register = None;
         if !state.keymap.pending().is_empty() {
             state.keymap.clear_pending();
             return KeyHandleResult::Stop;
@@ -85,234 +86,23 @@ where
             KeyHandleResult::Stop
         }
         KeymapResult::Cancelled(_) => {
-            // Invalid chord — reset count
+            // Invalid chord — reset count and selected register
             state.count = None;
+            state.selected_register = None;
             KeyHandleResult::Stop
         }
         KeymapResult::NotFound => {
             // In Normal/Select, unknown keys are swallowed to prevent insertion
             state.count = None;
+            state.selected_register = None;
             KeyHandleResult::Stop
         }
         KeymapResult::Matched(action) => {
             let count = state.count.take().map_or(1, |c| c.get());
-            execute_action(state, buffer, action, count)
+            let register = state.selected_register.take().unwrap_or('"');
+            let mut cx = crate::commands::Context::new(state, buffer, count, register);
+            crate::commands::dispatch(action, &mut cx)
         }
-    }
-}
-
-fn execute_action(
-    state: &mut EditorState,
-    buffer: &gtk::TextBuffer,
-    action: EditorAction,
-    count: usize,
-) -> KeyHandleResult {
-    let extend = state.mode == Mode::Select;
-
-    match action {
-        EditorAction::MoveLeft => {
-            motions::move_horizontally(buffer, -(count as i32), extend);
-            KeyHandleResult::Stop
-        }
-        EditorAction::MoveRight => {
-            motions::move_horizontally(buffer, count as i32, extend);
-            KeyHandleResult::Stop
-        }
-        EditorAction::MoveUp => {
-            motions::move_vertically(buffer, -(count as i32), extend);
-            KeyHandleResult::Stop
-        }
-        EditorAction::MoveDown => {
-            motions::move_vertically(buffer, count as i32, extend);
-            KeyHandleResult::Stop
-        }
-        EditorAction::MoveWordForward => {
-            for _ in 0..count {
-                motions::move_word_forward(buffer, extend);
-            }
-            KeyHandleResult::Stop
-        }
-        EditorAction::MoveWordBackward => {
-            for _ in 0..count {
-                motions::move_word_backward(buffer, extend);
-            }
-            KeyHandleResult::Stop
-        }
-        EditorAction::MoveWordEnd => {
-            for _ in 0..count {
-                motions::move_word_end(buffer, extend);
-            }
-            KeyHandleResult::Stop
-        }
-        EditorAction::SelectLine => {
-            for _ in 0..count {
-                motions::select_line(buffer, extend);
-            }
-            KeyHandleResult::Stop
-        }
-        EditorAction::EnterInsert => {
-            state.set_mode(Mode::Insert);
-            KeyHandleResult::ModeChanged(Mode::Insert)
-        }
-        EditorAction::EnterInsertAfter => {
-            motions::move_horizontally(buffer, 1, false);
-            state.set_mode(Mode::Insert);
-            KeyHandleResult::ModeChanged(Mode::Insert)
-        }
-        EditorAction::InsertAtLineStart => {
-            motions::insert_at_line_start(buffer);
-            state.set_mode(Mode::Insert);
-            KeyHandleResult::ModeChanged(Mode::Insert)
-        }
-        EditorAction::InsertAtLineEnd => {
-            motions::insert_at_line_end(buffer);
-            state.set_mode(Mode::Insert);
-            KeyHandleResult::ModeChanged(Mode::Insert)
-        }
-        EditorAction::EnterSelect => {
-            if state.mode == Mode::Select {
-                state.set_mode(Mode::Normal);
-                let iter = buffer.iter_at_mark(&buffer.get_insert());
-                buffer.place_cursor(&iter);
-                KeyHandleResult::ModeChanged(Mode::Normal)
-            } else {
-                state.set_mode(Mode::Select);
-                KeyHandleResult::ModeChanged(Mode::Select)
-            }
-        }
-        EditorAction::ExitToNormal => {
-            state.set_mode(Mode::Normal);
-            let iter = buffer.iter_at_mark(&buffer.get_insert());
-            buffer.place_cursor(&iter);
-            KeyHandleResult::ModeChanged(Mode::Normal)
-        }
-        EditorAction::DeleteSelection => {
-            motions::delete_selection(buffer);
-            if state.mode == Mode::Select {
-                state.set_mode(Mode::Normal);
-                return KeyHandleResult::ModeChanged(Mode::Normal);
-            }
-            KeyHandleResult::Stop
-        }
-        EditorAction::ChangeSelection => {
-            motions::delete_selection(buffer);
-            state.set_mode(Mode::Insert);
-            KeyHandleResult::ModeChanged(Mode::Insert)
-        }
-        EditorAction::YankSelection => {
-            let txt = motions::yank_selection(buffer);
-            if !txt.is_empty() {
-                state.clipboard = txt;
-            }
-            if state.mode == Mode::Select {
-                state.set_mode(Mode::Normal);
-                let iter = buffer.iter_at_mark(&buffer.get_insert());
-                buffer.place_cursor(&iter);
-                return KeyHandleResult::ModeChanged(Mode::Normal);
-            }
-            KeyHandleResult::Stop
-        }
-        EditorAction::PasteAfter => {
-            let clip = state.clipboard.clone();
-            for _ in 0..count {
-                motions::paste_after(buffer, &clip);
-            }
-            KeyHandleResult::Stop
-        }
-        EditorAction::PasteBefore => {
-            let clip = state.clipboard.clone();
-            for _ in 0..count {
-                motions::paste_after(buffer, &clip);
-            }
-            KeyHandleResult::Stop
-        }
-        EditorAction::Undo => {
-            for _ in 0..count {
-                motions::undo(buffer);
-            }
-            if state.mode == Mode::Select {
-                state.set_mode(Mode::Normal);
-                return KeyHandleResult::ModeChanged(Mode::Normal);
-            }
-            KeyHandleResult::Stop
-        }
-        EditorAction::Redo => {
-            for _ in 0..count {
-                motions::redo(buffer);
-            }
-            if state.mode == Mode::Select {
-                state.set_mode(Mode::Normal);
-                return KeyHandleResult::ModeChanged(Mode::Normal);
-            }
-            KeyHandleResult::Stop
-        }
-        EditorAction::MatchBrackets => {
-            motions::match_brackets(buffer, state.last_matched_bracket, extend);
-            KeyHandleResult::Stop
-        }
-        EditorAction::SurroundAdd => {
-            state.on_next_key(|state, buffer, key| {
-                if let crate::keymap::trie::KeyCode::Char(ch) = key.code {
-                    motions::surround_add(buffer, ch);
-                    if state.mode == Mode::Select {
-                        state.set_mode(Mode::Normal);
-                        return KeyHandleResult::ModeChanged(Mode::Normal);
-                    }
-                }
-                KeyHandleResult::Stop
-            });
-            KeyHandleResult::Stop
-        }
-        EditorAction::SurroundDelete => {
-            state.on_next_key(|state, buffer, key| {
-                if let crate::keymap::trie::KeyCode::Char(ch) = key.code {
-                    motions::surround_delete(buffer, ch);
-                    if state.mode == Mode::Select {
-                        state.set_mode(Mode::Normal);
-                        return KeyHandleResult::ModeChanged(Mode::Normal);
-                    }
-                }
-                KeyHandleResult::Stop
-            });
-            KeyHandleResult::Stop
-        }
-        EditorAction::SurroundReplace => {
-            state.on_next_key(|_state, _buffer, key| {
-                if let crate::keymap::trie::KeyCode::Char(from) = key.code {
-                    _state.on_next_key(move |state, buffer, key2| {
-                        if let crate::keymap::trie::KeyCode::Char(to) = key2.code {
-                            motions::surround_replace(buffer, from, to);
-                            if state.mode == Mode::Select {
-                                state.set_mode(Mode::Normal);
-                                return KeyHandleResult::ModeChanged(Mode::Normal);
-                            }
-                        }
-                        KeyHandleResult::Stop
-                    });
-                }
-                KeyHandleResult::Stop
-            });
-            KeyHandleResult::Stop
-        }
-        EditorAction::SelectTextObjectAround => {
-            state.on_next_key(|_state, buffer, key| {
-                if let crate::keymap::trie::KeyCode::Char(obj) = key.code {
-                    motions::select_textobject(buffer, obj, false);
-                }
-                KeyHandleResult::Stop
-            });
-            KeyHandleResult::Stop
-        }
-        EditorAction::SelectTextObjectInner => {
-            state.on_next_key(|_state, buffer, key| {
-                if let crate::keymap::trie::KeyCode::Char(obj) = key.code {
-                    motions::select_textobject(buffer, obj, true);
-                }
-                KeyHandleResult::Stop
-            });
-            KeyHandleResult::Stop
-        }
-        EditorAction::Noop => KeyHandleResult::Stop,
     }
 }
 
@@ -441,7 +231,8 @@ mod tests {
         // Need to be in Select to test y
         state.set_mode(Mode::Select);
         handle_key(&mut state, &buf, KeyEvent::char('y'));
-        assert_eq!(state.clipboard, "hello");
+        assert_eq!(state.registers.read('"'), "hello");
+        assert_eq!(state.registers.read('0'), "hello");
         assert_eq!(state.mode, Mode::Normal);
         buf.place_cursor(&buf.iter_at_offset(5));
         handle_key(&mut state, &buf, KeyEvent::char('p'));
@@ -925,4 +716,232 @@ mod tests {
             "target text"
         );
     }
+
+    #[test]
+    fn named_register_yank_and_paste() {
+        if !ensure_gtk() {
+            return;
+        }
+        let mut state = EditorState::new();
+        let buf = buf_with("foo bar baz");
+
+        // Select "foo" (0..3)
+        state.set_mode(Mode::Select);
+        buf.select_range(&buf.iter_at_offset(0), &buf.iter_at_offset(3));
+
+        // " a y -> yank into register 'a'
+        handle_key(&mut state, &buf, KeyEvent::char('"'));
+        assert!(state.on_next_key.is_some());
+        handle_key(&mut state, &buf, KeyEvent::char('a'));
+        assert_eq!(state.selected_register, Some('a'));
+
+        handle_key(&mut state, &buf, KeyEvent::char('y'));
+        assert_eq!(state.selected_register, None); // consumed
+        assert_eq!(state.registers.read('a'), "foo");
+        assert_eq!(state.registers.read('"'), ""); // default untouched
+        assert_eq!(state.registers.read('0'), ""); // yank register 0 untouched
+
+        // Move to end (offset 11) and paste from 'a' via: " a p
+        buf.place_cursor(&buf.iter_at_offset(11));
+        handle_key(&mut state, &buf, KeyEvent::char('"'));
+        handle_key(&mut state, &buf, KeyEvent::char('a'));
+        handle_key(&mut state, &buf, KeyEvent::char('p'));
+
+        assert_eq!(
+            buf.text(&buf.start_iter(), &buf.end_iter(), false).as_str(),
+            "foo bar bazfoo"
+        );
+    }
+
+    #[test]
+    fn black_hole_register_delete() {
+        if !ensure_gtk() {
+            return;
+        }
+        let mut state = EditorState::new();
+        let buf = buf_with("keep_me delete_me");
+
+        // First yank "keep_me" into default register
+        state.set_mode(Mode::Select);
+        buf.select_range(&buf.iter_at_offset(0), &buf.iter_at_offset(7));
+        handle_key(&mut state, &buf, KeyEvent::char('y'));
+        assert_eq!(state.registers.read('"'), "keep_me");
+
+        // Now select "delete_me" (8..17)
+        state.set_mode(Mode::Select);
+        buf.select_range(&buf.iter_at_offset(8), &buf.iter_at_offset(17));
+
+        // " _ d -> delete into black hole
+        handle_key(&mut state, &buf, KeyEvent::char('"'));
+        handle_key(&mut state, &buf, KeyEvent::char('_'));
+        handle_key(&mut state, &buf, KeyEvent::char('d'));
+
+        // Buffer content is deleted
+        assert_eq!(
+            buf.text(&buf.start_iter(), &buf.end_iter(), false).as_str(),
+            "keep_me "
+        );
+        // But default register STILL holds "keep_me"!
+        assert_eq!(state.registers.read('"'), "keep_me");
+    }
+
+    #[test]
+    fn yank_register_0_persists_across_deletes() {
+        if !ensure_gtk() {
+            return;
+        }
+        let mut state = EditorState::new();
+        let buf = buf_with("alpha beta gamma");
+
+        // Yank "alpha" into default
+        state.set_mode(Mode::Select);
+        buf.select_range(&buf.iter_at_offset(0), &buf.iter_at_offset(5));
+        handle_key(&mut state, &buf, KeyEvent::char('y'));
+        assert_eq!(state.registers.read('"'), "alpha");
+        assert_eq!(state.registers.read('0'), "alpha");
+
+        // Delete "beta" into default
+        state.set_mode(Mode::Select);
+        buf.select_range(&buf.iter_at_offset(6), &buf.iter_at_offset(10));
+        handle_key(&mut state, &buf, KeyEvent::char('d'));
+
+        // Default register is now "beta", but yank register '0' is still "alpha"!
+        assert_eq!(state.registers.read('"'), "beta");
+        assert_eq!(state.registers.read('0'), "alpha");
+
+        // " 0 p pastes "alpha", not "beta"
+        buf.place_cursor(&buf.iter_at_offset(buf.end_iter().offset()));
+        handle_key(&mut state, &buf, KeyEvent::char('"'));
+        handle_key(&mut state, &buf, KeyEvent::char('0'));
+        handle_key(&mut state, &buf, KeyEvent::char('p'));
+
+        assert!(buf.text(&buf.start_iter(), &buf.end_iter(), false).ends_with("alpha"));
+    }
+
+    #[test]
+    fn shifted_register_yank_and_paste_in_normal_mode() {
+        if !ensure_gtk() {
+            return;
+        }
+        let mut state = EditorState::new();
+        let buf = buf_with("hello world");
+        assert_eq!(state.mode, Mode::Normal);
+
+        // Place cursor on 'h' at offset 0
+        buf.place_cursor(&buf.iter_at_offset(0));
+
+        // Simulate user pressing Shift+' (producing GDK quotedbl with SHIFT modifier)
+        let key_quote = crate::keymap::gdk_to_key_event('"' as u32, 1).unwrap();
+        let res_quote = handle_key(&mut state, &buf, key_quote);
+        assert_eq!(res_quote, KeyHandleResult::Stop);
+        assert_eq!(state.mode, Mode::Normal);
+        assert!(state.on_next_key.is_some());
+
+        // Press 'a' to select register 'a'
+        let res_a = handle_key(&mut state, &buf, KeyEvent::char('a'));
+        assert_eq!(res_a, KeyHandleResult::Stop);
+        assert_eq!(state.mode, Mode::Normal);
+        assert_eq!(state.selected_register, Some('a'));
+
+        // Press 'y' to yank character under cursor ('h') into register 'a'
+        let res_y = handle_key(&mut state, &buf, KeyEvent::char('y'));
+        assert_eq!(res_y, KeyHandleResult::Stop);
+        assert_eq!(state.mode, Mode::Normal);
+        assert_eq!(state.selected_register, None); // consumed
+        assert_eq!(state.registers.read('a'), "h");
+        // Ensure buffer was not modified (e.g. no 'y' inserted)
+        assert_eq!(
+            buf.text(&buf.start_iter(), &buf.end_iter(), false).as_str(),
+            "hello world"
+        );
+
+        // Now move cursor to end and paste with " a p (with shifted quote again)
+        buf.place_cursor(&buf.iter_at_offset(11));
+        let res_paste_quote = handle_key(&mut state, &buf, key_quote);
+        assert_eq!(res_paste_quote, KeyHandleResult::Stop);
+        let res_paste_a = handle_key(&mut state, &buf, KeyEvent::char('a'));
+        assert_eq!(res_paste_a, KeyHandleResult::Stop);
+        let res_paste_p = handle_key(&mut state, &buf, KeyEvent::char('p'));
+        assert_eq!(res_paste_p, KeyHandleResult::Stop);
+
+        assert_eq!(
+            buf.text(&buf.start_iter(), &buf.end_iter(), false).as_str(),
+            "hello worldh"
+        );
+    }
+
+    #[test]
+    fn numbered_register_1_yank_and_paste_vs_default_register() {
+        if !ensure_gtk() {
+            return;
+        }
+        let mut state = EditorState::new();
+        let buf = buf_with("foo bar");
+
+        // 1. " 1 y on "foo" (0..3) using GDK shifted quote
+        let key_quote = crate::keymap::gdk_to_key_event('"' as u32, 1).unwrap();
+        state.set_mode(Mode::Select);
+        buf.select_range(&buf.iter_at_offset(0), &buf.iter_at_offset(3));
+
+        handle_key(&mut state, &buf, key_quote);
+        assert!(state.on_next_key.is_some());
+        handle_key(&mut state, &buf, KeyEvent::char('1'));
+        assert_eq!(state.selected_register, Some('1'));
+        handle_key(&mut state, &buf, KeyEvent::char('y'));
+        assert_eq!(state.registers.read('1'), "foo");
+        assert_eq!(state.registers.read('"'), ""); // default register untouched!
+
+        // 2. Select "bar" (4..7) and simply yank with normal 'y'
+        state.set_mode(Mode::Select);
+        buf.select_range(&buf.iter_at_offset(4), &buf.iter_at_offset(7));
+        handle_key(&mut state, &buf, KeyEvent::char('y'));
+        assert_eq!(state.registers.read('"'), "bar");
+        // Register '1' still has "foo"
+        assert_eq!(state.registers.read('1'), "foo");
+
+        // 3. Normal 'p' pastes from default register ("bar")
+        buf.place_cursor(&buf.iter_at_offset(buf.end_iter().offset()));
+        handle_key(&mut state, &buf, KeyEvent::char('p'));
+        assert!(buf.text(&buf.start_iter(), &buf.end_iter(), false).ends_with("bar"));
+
+        // 4. " 1 p pastes from register '1' ("foo"), NOT default register ("bar")!
+        buf.place_cursor(&buf.iter_at_offset(buf.end_iter().offset()));
+        handle_key(&mut state, &buf, key_quote);
+        handle_key(&mut state, &buf, KeyEvent::char('1'));
+        handle_key(&mut state, &buf, KeyEvent::char('p'));
+        assert!(buf.text(&buf.start_iter(), &buf.end_iter(), false).ends_with("foo"));
+    }
+
+    #[test]
+    fn space_y_and_space_p_clipboard() {
+        if !ensure_gtk() {
+            return;
+        }
+        let mut state = EditorState::new();
+        let buf = buf_with("helix editor");
+
+        // Select "helix" (0..5)
+        state.set_mode(Mode::Select);
+        buf.select_range(&buf.iter_at_offset(0), &buf.iter_at_offset(5));
+
+        // Space y -> yank to system clipboard '+'
+        handle_key(&mut state, &buf, KeyEvent::char(' '));
+        let res = handle_key(&mut state, &buf, KeyEvent::char('y'));
+        assert_eq!(res, KeyHandleResult::ModeChanged(Mode::Normal));
+        assert_eq!(state.mode, Mode::Normal);
+        assert_eq!(state.registers.read('+'), "helix");
+
+        // Move to end and Space p -> paste system clipboard
+        buf.place_cursor(&buf.iter_at_offset(12));
+        handle_key(&mut state, &buf, KeyEvent::char(' '));
+        handle_key(&mut state, &buf, KeyEvent::char('p'));
+
+        assert_eq!(
+            buf.text(&buf.start_iter(), &buf.end_iter(), false).as_str(),
+            "helix editorhelix"
+        );
+    }
 }
+
+
+

@@ -123,7 +123,7 @@ src/components/                         helix-term/ui/ & compositor.rs
 ### Phase 4: State, Registers & Command Dispatch (Mirroring `helix-view` & `helix-term`)
 *Goal: Introduce unified execution Context and real system clipboard integration.*
 
-- [ ] **4.1 Implement Registers and GDK Clipboard integration (`src/editor/register.rs`)**
+- [x] **4.1 Implement Registers and GDK Clipboard integration (`src/editor/register.rs`)**
   - **Priority**: P2
   - **Dependencies**: Phase 2
   - **Details**:
@@ -131,7 +131,7 @@ src/components/                         helix-term/ui/ & compositor.rs
     - `+` and `*` registers backed by `gdk::Display::default().clipboard()`.
     - Update `delete`, `change`, `yank`, and `paste` actions to read/write through registers.
 
-- [ ] **4.2 Introduce Command `Context` & Modular Command Dispatch**
+- [x] **4.2 Introduce Command `Context` & Modular Command Dispatch**
   - **Priority**: P2
   - **Dependencies**: 3.2, 4.1
   - **Files**: Create `src/commands/mod.rs`
