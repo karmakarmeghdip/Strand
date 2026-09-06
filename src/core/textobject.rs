@@ -38,11 +38,15 @@ pub fn word_bounds_at(buffer: &gtk::TextBuffer, pos: usize) -> Option<(usize, us
 
 pub fn select_textobject(buffer: &impl IsA<TextBuffer>, obj: char, inside: bool) {
     let buffer = buffer.as_ref();
-    let cur_iter = buffer.iter_at_mark(&buffer.get_insert());
-    let pos = cur_iter.offset() as usize;
     if buffer.char_count() == 0 {
         return;
     }
+    let cur_iter = if buffer.has_selection() {
+        buffer.selection_bounds().unwrap().0
+    } else {
+        buffer.iter_at_mark(&buffer.get_insert())
+    };
+    let pos = cur_iter.offset() as usize;
 
     let bounds: Option<(i32, i32)> = match obj {
         'w' => word_bounds_at(buffer, pos).map(|(start, end)| {
@@ -196,31 +200,14 @@ pub fn select_textobject(buffer: &impl IsA<TextBuffer>, obj: char, inside: bool)
 mod tests {
     use super::*;
 
-    fn ensure_gtk() -> bool {
-        static INIT: std::sync::Once = std::sync::Once::new();
-        INIT.call_once(|| {
-            let _ = std::panic::catch_unwind(|| gtk::init());
-        });
-        if !gtk::is_initialized() {
-            return false;
-        }
-        std::panic::catch_unwind(|| {
-            let _ = gtk::TextBuffer::new(None);
-        })
-        .is_ok()
-    }
-
     fn make_buffer(text: &str) -> TextBuffer {
         let buf = TextBuffer::new(None);
         buf.set_text(text);
         buf
     }
 
-    #[test]
+    #[gtk::test]
     fn test_textobjects_suite() {
-        if !ensure_gtk() {
-            return;
-        }
         let buf = make_buffer("let x = (hello world);");
         buf.place_cursor(&buf.iter_at_offset(10));
 

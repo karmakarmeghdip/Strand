@@ -20,9 +20,12 @@ pub use match_brackets::{
     match_brackets, BRACKETS, PAIRS,
 };
 pub use movement::{
-    delete_selection, insert_at_line_end, insert_at_line_start, move_horizontally,
-    move_long_word_forward, move_vertically, move_word_backward, move_word_end, move_word_forward,
-    paste_after, redo, select_line, undo, word_move, yank_selection, BufferChars, WordMotionTarget,
+    collapse_selection, delete_selection, flip_selection, goto_file_end, goto_file_start,
+    goto_first_nonwhitespace, goto_line, goto_line_end, goto_line_start, insert_at_line_end,
+    insert_at_line_start, is_linewise, move_horizontally, move_long_word_forward, move_vertically,
+    move_word_backward, move_word_end, move_word_forward, open_above, open_below, paste_after,
+    paste_before, redo, replace_char, select_all, select_line, toggle_case, undo, word_move,
+    yank_selection, BufferChars, WordMotionTarget,
 };
 pub use selection::{
     apply_range, current_range, iter_at_offset, offset_at_insert, offset_at_selection_bound,

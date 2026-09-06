@@ -10,6 +10,7 @@ pub struct Context<'a> {
     pub state: &'a mut EditorState,
     pub buffer: &'a gtk::TextBuffer,
     pub count: usize,
+    pub raw_count: Option<std::num::NonZeroUsize>,
     pub register: char,
 }
 
@@ -24,6 +25,23 @@ impl<'a> Context<'a> {
             state,
             buffer,
             count,
+            raw_count: None,
+            register,
+        }
+    }
+
+    pub fn with_raw_count(
+        state: &'a mut EditorState,
+        buffer: &'a gtk::TextBuffer,
+        raw_count: Option<std::num::NonZeroUsize>,
+        register: char,
+    ) -> Self {
+        let count = raw_count.map_or(1, |c| c.get());
+        Self {
+            state,
+            buffer,
+            count,
+            raw_count,
             register,
         }
     }
@@ -81,6 +99,11 @@ pub fn dispatch(action: EditorAction, cx: &mut Context) -> KeyHandleResult {
         EditorAction::MoveWordEnd => motion::move_word_end(cx),
         EditorAction::SelectLine => motion::select_line(cx),
         EditorAction::MatchBrackets => motion::match_brackets(cx),
+        EditorAction::GotoFileStart => motion::goto_file_start(cx),
+        EditorAction::GotoFileEnd => motion::goto_file_end(cx),
+        EditorAction::GotoLineStart => motion::goto_line_start(cx),
+        EditorAction::GotoLineEnd => motion::goto_line_end(cx),
+        EditorAction::GotoFirstNonWhitespace => motion::goto_first_nonwhitespace(cx),
 
         // Mode switches
         EditorAction::EnterInsert => edit::enter_insert(cx),
@@ -98,6 +121,13 @@ pub fn dispatch(action: EditorAction, cx: &mut Context) -> KeyHandleResult {
         EditorAction::PasteBefore => edit::paste_before(cx),
         EditorAction::Undo => edit::undo(cx),
         EditorAction::Redo => edit::redo(cx),
+        EditorAction::OpenBelow => edit::open_below(cx),
+        EditorAction::OpenAbove => edit::open_above(cx),
+        EditorAction::Replace => edit::replace(cx),
+        EditorAction::SelectAll => edit::select_all(cx),
+        EditorAction::CollapseSelection => edit::collapse_selection(cx),
+        EditorAction::FlipSelection => edit::flip_selection(cx),
+        EditorAction::ToggleCase => edit::toggle_case(cx),
         EditorAction::SelectRegister => edit::select_register(cx),
         EditorAction::YankToClipboard => edit::yank_to_clipboard(cx),
         EditorAction::PasteClipboardAfter => edit::paste_clipboard_after(cx),

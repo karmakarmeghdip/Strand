@@ -63,6 +63,22 @@ pub enum EditorAction {
     PasteClipboardAfter,  // <space>p — paste system clipboard after
     PasteClipboardBefore, // <space>P — paste system clipboard before
 
+    // Goto actions (g prefix)
+    GotoFileStart,          // gg (or <n>gg to jump to line n)
+    GotoFileEnd,            // ge
+    GotoLineStart,          // gh
+    GotoLineEnd,            // gl
+    GotoFirstNonWhitespace, // gs
+
+    // Primitives
+    OpenBelow,         // o
+    OpenAbove,         // O
+    Replace,           // r<char>
+    SelectAll,         // %
+    CollapseSelection, // ;
+    FlipSelection,     // Alt-;
+    ToggleCase,        // ~
+
     // Structural / palette
     Noop,
 }
@@ -91,6 +107,18 @@ impl EditorAction {
             Self::PasteBefore => "paste before",
             Self::Undo => "undo change",
             Self::Redo => "redo change",
+            Self::GotoFileStart => "goto file start",
+            Self::GotoFileEnd => "goto file end",
+            Self::GotoLineStart => "goto line start",
+            Self::GotoLineEnd => "goto line end",
+            Self::GotoFirstNonWhitespace => "goto first non-whitespace character",
+            Self::OpenBelow => "open newline below",
+            Self::OpenAbove => "open newline above",
+            Self::Replace => "replace character under cursor",
+            Self::SelectAll => "select all",
+            Self::CollapseSelection => "collapse selection to cursor",
+            Self::FlipSelection => "flip selection anchor and head",
+            Self::ToggleCase => "toggle case of selection",
             Self::MatchBrackets => "goto matching bracket",
             Self::SurroundAdd => "surround selection",
             Self::SurroundDelete => "delete surround pair",

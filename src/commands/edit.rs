@@ -97,6 +97,12 @@ pub fn paste_after(cx: &mut Context) -> KeyHandleResult {
         }
         cx.set_status("Pasted");
     }
+    if cx.state.mode == Mode::Select {
+        cx.state.set_mode(Mode::Normal);
+        let iter = cx.buffer.iter_at_mark(&cx.buffer.get_insert());
+        cx.buffer.place_cursor(&iter);
+        return KeyHandleResult::ModeChanged(Mode::Normal);
+    }
     KeyHandleResult::Stop
 }
 
@@ -104,9 +110,15 @@ pub fn paste_before(cx: &mut Context) -> KeyHandleResult {
     let text = cx.state.registers.read(cx.register()).to_string();
     if !text.is_empty() {
         for _ in 0..cx.count() {
-            motions::paste_after(cx.buffer, &text);
+            motions::paste_before(cx.buffer, &text);
         }
         cx.set_status("Pasted");
+    }
+    if cx.state.mode == Mode::Select {
+        cx.state.set_mode(Mode::Normal);
+        let iter = cx.buffer.iter_at_mark(&cx.buffer.get_insert());
+        cx.buffer.place_cursor(&iter);
+        return KeyHandleResult::ModeChanged(Mode::Normal);
     }
     KeyHandleResult::Stop
 }
@@ -134,6 +146,12 @@ pub fn paste_clipboard_after(cx: &mut Context) -> KeyHandleResult {
         }
         cx.set_status("Pasted from clipboard (+)");
     }
+    if cx.state.mode == Mode::Select {
+        cx.state.set_mode(Mode::Normal);
+        let iter = cx.buffer.iter_at_mark(&cx.buffer.get_insert());
+        cx.buffer.place_cursor(&iter);
+        return KeyHandleResult::ModeChanged(Mode::Normal);
+    }
     KeyHandleResult::Stop
 }
 
@@ -141,9 +159,15 @@ pub fn paste_clipboard_before(cx: &mut Context) -> KeyHandleResult {
     let text = cx.state.registers.read('+').to_string();
     if !text.is_empty() {
         for _ in 0..cx.count() {
-            motions::paste_after(cx.buffer, &text);
+            motions::paste_before(cx.buffer, &text);
         }
         cx.set_status("Pasted from clipboard (+)");
+    }
+    if cx.state.mode == Mode::Select {
+        cx.state.set_mode(Mode::Normal);
+        let iter = cx.buffer.iter_at_mark(&cx.buffer.get_insert());
+        cx.buffer.place_cursor(&iter);
+        return KeyHandleResult::ModeChanged(Mode::Normal);
     }
     KeyHandleResult::Stop
 }
@@ -250,5 +274,65 @@ pub fn select_textobject_inner(cx: &mut Context) -> KeyHandleResult {
         }
         KeyHandleResult::Stop
     });
+    KeyHandleResult::Stop
+}
+
+pub fn open_below(cx: &mut Context) -> KeyHandleResult {
+    motions::open_below(cx.buffer, cx.count());
+    cx.state.set_mode(Mode::Insert);
+    KeyHandleResult::ModeChanged(Mode::Insert)
+}
+
+pub fn open_above(cx: &mut Context) -> KeyHandleResult {
+    motions::open_above(cx.buffer, cx.count());
+    cx.state.set_mode(Mode::Insert);
+    KeyHandleResult::ModeChanged(Mode::Insert)
+}
+
+pub fn replace(cx: &mut Context) -> KeyHandleResult {
+    cx.on_next_key(|state, buffer, key| {
+        let ch = match key.code {
+            KeyCode::Char(c) => Some(c.to_string()),
+            KeyCode::Enter => Some("\n".to_string()),
+            KeyCode::Tab => Some("\t".to_string()),
+            _ => None,
+        };
+        if let Some(s) = ch {
+            motions::replace_char(buffer, &s);
+        }
+        if state.mode == Mode::Select {
+            state.set_mode(Mode::Normal);
+            let iter = buffer.iter_at_mark(&buffer.get_insert());
+            buffer.place_cursor(&iter);
+            return KeyHandleResult::ModeChanged(Mode::Normal);
+        }
+        KeyHandleResult::Stop
+    });
+    KeyHandleResult::Stop
+}
+
+pub fn select_all(cx: &mut Context) -> KeyHandleResult {
+    motions::select_all(cx.buffer);
+    KeyHandleResult::Stop
+}
+
+pub fn collapse_selection(cx: &mut Context) -> KeyHandleResult {
+    motions::collapse_selection(cx.buffer);
+    KeyHandleResult::Stop
+}
+
+pub fn flip_selection(cx: &mut Context) -> KeyHandleResult {
+    motions::flip_selection(cx.buffer);
+    KeyHandleResult::Stop
+}
+
+pub fn toggle_case(cx: &mut Context) -> KeyHandleResult {
+    motions::toggle_case(cx.buffer);
+    if cx.state.mode == Mode::Select {
+        cx.state.set_mode(Mode::Normal);
+        let iter = cx.buffer.iter_at_mark(&cx.buffer.get_insert());
+        cx.buffer.place_cursor(&iter);
+        return KeyHandleResult::ModeChanged(Mode::Normal);
+    }
     KeyHandleResult::Stop
 }

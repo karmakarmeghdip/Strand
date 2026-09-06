@@ -112,9 +112,9 @@ where
                 .sticky
                 .as_ref()
                 .map(crate::components::which_key::WhichKeyData::from_trie_node);
-            let count = state.count.take().map_or(1, |c| c.get());
+            let raw_count = state.count.take();
             let register = state.selected_register.take().unwrap_or('"');
-            let mut cx = crate::commands::Context::new(state, buffer, count, register);
+            let mut cx = crate::commands::Context::with_raw_count(state, buffer, raw_count, register);
             crate::commands::dispatch(action, &mut cx)
         }
     }
@@ -122,19 +122,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    fn ensure_gtk() -> bool {
-        static INIT: std::sync::Once = std::sync::Once::new();
-        INIT.call_once(|| {
-            let _ = std::panic::catch_unwind(|| gtk::init());
-        });
-        if !gtk::is_initialized() {
-            return false;
-        }
-        std::panic::catch_unwind(|| {
-            let _ = gtk::TextBuffer::new(None);
-        })
-        .is_ok()
-    }
     use super::*;
     use crate::keymap::{trie::KeyCode, KeyModifiers};
 
@@ -144,9 +131,8 @@ mod tests {
         b
     }
 
-    #[test]
+    #[gtk::test]
     fn insert_passthrough_and_esc() {
-        if !ensure_gtk() { return; }
         let mut state = EditorState::new();
         state.set_mode(Mode::Insert);
         let buf = buf_with("hi");
@@ -165,9 +151,8 @@ mod tests {
         assert_eq!(state.mode, Mode::Normal);
     }
 
-    #[test]
+    #[gtk::test]
     fn normal_hjkl() {
-        if !ensure_gtk() { return; }
         let mut state = EditorState::new();
         let buf = buf_with("hello\nworld");
         buf.place_cursor(&buf.iter_at_offset(0));
@@ -181,9 +166,8 @@ mod tests {
         assert_eq!(buf.iter_at_mark(&buf.get_insert()).line(), 0);
     }
 
-    #[test]
+    #[gtk::test]
     fn normal_i_enters_insert() {
-        if !ensure_gtk() { return; }
         let mut state = EditorState::new();
         let buf = buf_with("hi");
         let res = handle_key(&mut state, &buf, KeyEvent::char('i'));
@@ -191,9 +175,8 @@ mod tests {
         assert_eq!(state.mode, Mode::Insert);
     }
 
-    #[test]
+    #[gtk::test]
     fn normal_v_enters_select_and_extends() {
-        if !ensure_gtk() { return; }
         let mut state = EditorState::new();
         let buf = buf_with("hello world");
         buf.place_cursor(&buf.iter_at_offset(0));
@@ -205,9 +188,8 @@ mod tests {
         assert!(head != anchor);
     }
 
-    #[test]
+    #[gtk::test]
     fn esc_from_select_goes_normal() {
-        if !ensure_gtk() { return; }
         let mut state = EditorState::new();
         state.set_mode(Mode::Select);
         let buf = buf_with("hi");
@@ -219,9 +201,8 @@ mod tests {
         assert_eq!(res, KeyHandleResult::ModeChanged(Mode::Normal));
     }
 
-    #[test]
+    #[gtk::test]
     fn word_motions_via_trie() {
-        if !ensure_gtk() { return; }
         let mut state = EditorState::new();
         let buf = buf_with("hello world foo");
         buf.place_cursor(&buf.iter_at_offset(0));
@@ -235,9 +216,8 @@ mod tests {
         assert!(buf.iter_at_mark(&buf.get_insert()).offset() > 0);
     }
 
-    #[test]
+    #[gtk::test]
     fn delete_yank_paste() {
-        if !ensure_gtk() { return; }
         let mut state = EditorState::new();
         let buf = buf_with("hello world");
         // select hello
@@ -253,9 +233,8 @@ mod tests {
         assert!(buf.text(&mut buf.start_iter(), &mut buf.end_iter(), false).contains("hello"));
     }
 
-    #[test]
+    #[gtk::test]
     fn pending_g_and_space() {
-        if !ensure_gtk() { return; }
         let mut state = EditorState::new();
         let buf = buf_with("hi");
         let res = handle_key(&mut state, &buf, KeyEvent::char('g'));
@@ -274,9 +253,8 @@ mod tests {
         let _ = res2;
     }
 
-    #[test]
+    #[gtk::test]
     fn which_key_space_g_m_and_chord_completion() {
-        if !ensure_gtk() { return; }
         let mut state = EditorState::new();
         let buf = buf_with("hello world");
 
@@ -302,9 +280,8 @@ mod tests {
         assert!(state.which_key.is_none());
     }
 
-    #[test]
+    #[gtk::test]
     fn which_key_ctrl_g_dismisses() {
-        if !ensure_gtk() { return; }
         let mut state = EditorState::new();
         let buf = buf_with("hello");
 
@@ -319,9 +296,8 @@ mod tests {
         assert!(state.keymap.pending().is_empty());
     }
 
-    #[test]
+    #[gtk::test]
     fn which_key_registers_lifecycle() {
-        if !ensure_gtk() { return; }
         let mut state = EditorState::new();
         state.registers.write('"', "yanked text");
         let buf = buf_with("hello");
@@ -339,20 +315,18 @@ mod tests {
         assert_eq!(state.selected_register, Some('0'));
     }
 
-    #[test]
+    #[gtk::test]
     fn x_selects_line() {
-        if !ensure_gtk() { return; }
         let mut state = EditorState::new();
         let buf = buf_with("line1\nline2\nline3");
         buf.place_cursor(&buf.iter_at_line(1).unwrap());
         handle_key(&mut state, &buf, KeyEvent::char('x'));
         let (mut s, mut e) = buf.selection_bounds().unwrap();
-        assert_eq!(buf.text(&mut s, &mut e, false), "line2");
+        assert_eq!(buf.text(&mut s, &mut e, false), "line2\n");
     }
 
-    #[test]
+    #[gtk::test]
     fn x_extends_to_next_line_on_repeat() {
-        if !ensure_gtk() { return; }
         let mut state = EditorState::new();
         let buf = buf_with("line1\nline2\nline3\nline4");
         buf.place_cursor(&buf.iter_at_line(0).unwrap());
@@ -367,9 +341,8 @@ mod tests {
         assert_eq!(buf.text(&mut s3, &mut e3, false), "line1\nline2\nline3\n");
     }
 
-    #[test]
+    #[gtk::test]
     fn v_then_l_extends_and_keeps_anchor() {
-        if !ensure_gtk() { return; }
         let mut state = EditorState::new();
         let buf = buf_with("hello");
         buf.place_cursor(&buf.iter_at_offset(0));
@@ -392,9 +365,8 @@ mod tests {
         assert_eq!(head3, 3);
     }
 
-    #[test]
+    #[gtk::test]
     fn w_in_normal_creates_selection_and_wc_deletes_word() {
-        if !ensure_gtk() { return; }
         let mut state = EditorState::new();
         let buf = buf_with("hello world foo");
         buf.place_cursor(&buf.iter_at_offset(0));
@@ -411,9 +383,8 @@ mod tests {
         assert!(!txt.starts_with("hello"), "word should be deleted, got {:?}", txt);
     }
 
-    #[test]
+    #[gtk::test]
     fn w_in_select_extends_selection() {
-        if !ensure_gtk() { return; }
         let mut state = EditorState::new();
         let buf = buf_with("hello world foo bar");
         buf.place_cursor(&buf.iter_at_offset(0));
@@ -429,9 +400,8 @@ mod tests {
         assert!(sel2.len() > sel1.len());
     }
 
-    #[test]
+    #[gtk::test]
     fn w_across_newline_does_not_select_newline() {
-        if !ensure_gtk() { return; }
         let mut state = EditorState::new();
         let buf = buf_with("hello\nworld\nfoo");
         buf.place_cursor(&buf.iter_at_offset(0));
@@ -454,9 +424,8 @@ mod tests {
         }
     }
 
-    #[test]
+    #[gtk::test]
     fn k_from_fn_main_goes_up_not_left() {
-        if !ensure_gtk() { return; }
         let text = "// Strand — Phase 1: AdwApplicationWindow + GtkSourceView\n// Verify: syntax highlighting, line numbers, kinetic scroll\n\nfn main() {\n    println!(\"Hello, Strand!\");";
         let buf = buf_with(text);
         let offset = text.find("fn main").unwrap();
@@ -475,11 +444,8 @@ mod tests {
         assert_eq!(after_up, before_line - 1, "Up should go up");
     }
 
-    #[test]
+    #[gtk::test]
     fn normal_i_and_a_insert_at_line_start_and_end() {
-        if !ensure_gtk() {
-            return;
-        }
         let mut state = EditorState::new();
         let buf = buf_with("    let x = 10;");
         buf.place_cursor(&buf.iter_at_offset(8));
@@ -505,11 +471,8 @@ mod tests {
         assert_eq!(buf.iter_at_mark(&buf.get_insert()).offset(), 15);
     }
 
-    #[test]
+    #[gtk::test]
     fn select_mode_i_and_a() {
-        if !ensure_gtk() {
-            return;
-        }
         let mut state = EditorState::new();
         let buf = buf_with("    fn main() {}");
         state.set_mode(Mode::Select);
@@ -535,11 +498,8 @@ mod tests {
         assert_eq!(buf.iter_at_mark(&buf.get_insert()).offset(), 16);
     }
 
-    #[test]
+    #[gtk::test]
     fn undo_and_redo_keys() {
-        if !ensure_gtk() {
-            return;
-        }
         let mut state = EditorState::new();
         let buf = buf_with("initial");
         buf.set_enable_undo(true);
@@ -567,25 +527,19 @@ mod tests {
         );
     }
 
-    #[test]
+    #[gtk::test]
     fn match_mode_mm_jump() {
-        if !ensure_gtk() {
-            return;
-        }
         let mut state = EditorState::new();
         let buf = buf_with("fn foo() { let x = 1; }");
         buf.place_cursor(&buf.iter_at_offset(9)); // on '{'
         handle_key(&mut state, &buf, KeyEvent::char('m'));
         let res = handle_key(&mut state, &buf, KeyEvent::char('m'));
         assert_eq!(res, KeyHandleResult::Stop);
-        assert_eq!(buf.iter_at_mark(&buf.get_insert()).offset(), 23); // on '}'
+        assert_eq!(buf.iter_at_mark(&buf.get_insert()).offset(), 22); // on '}'
     }
 
-    #[test]
+    #[gtk::test]
     fn match_mode_surround_add_in_select() {
-        if !ensure_gtk() {
-            return;
-        }
         let mut state = EditorState::new();
         let buf = buf_with("hello world");
         state.set_mode(Mode::Select);
@@ -600,11 +554,8 @@ mod tests {
         assert_eq!(full, "(hello) world");
     }
 
-    #[test]
+    #[gtk::test]
     fn match_mode_surround_delete_and_replace() {
-        if !ensure_gtk() {
-            return;
-        }
         let mut state = EditorState::new();
         let buf = buf_with("let a = (foo);");
         buf.place_cursor(&buf.iter_at_offset(10)); // inside "(foo)"
@@ -627,11 +578,8 @@ mod tests {
         assert_eq!(text2, "let a = foo;");
     }
 
-    #[test]
+    #[gtk::test]
     fn match_mode_textobjects_inner_and_around() {
-        if !ensure_gtk() {
-            return;
-        }
         let mut state = EditorState::new();
         let buf = buf_with("fn bar() { hello_world }");
         buf.place_cursor(&buf.iter_at_offset(15)); // inside '{ ... }'
@@ -653,11 +601,8 @@ mod tests {
         assert_eq!(buf.text(&s2, &e2, false).as_str(), "{ hello_world }");
     }
 
-    #[test]
+    #[gtk::test]
     fn numerical_count_hjkl_motions() {
-        if !ensure_gtk() {
-            return;
-        }
         let mut state = EditorState::new();
         let buf = buf_with("line0\nline1\nline2\nline3\nline4\nline5\nline6\n");
         buf.place_cursor(&buf.iter_at_offset(0));
@@ -686,11 +631,8 @@ mod tests {
         assert_eq!(buf.iter_at_mark(&buf.get_insert()).line_offset(), 2);
     }
 
-    #[test]
+    #[gtk::test]
     fn numerical_count_multi_digit_and_reset() {
-        if !ensure_gtk() {
-            return;
-        }
         let mut state = EditorState::new();
         let buf = buf_with("abcdefghijklmnopqrstuvwxyz");
         buf.place_cursor(&buf.iter_at_offset(0));
@@ -711,11 +653,8 @@ mod tests {
         assert_eq!(buf.iter_at_mark(&buf.get_insert()).offset(), 13);
     }
 
-    #[test]
+    #[gtk::test]
     fn numerical_count_cancelled_by_esc() {
-        if !ensure_gtk() {
-            return;
-        }
         let mut state = EditorState::new();
         let buf = buf_with("line0\nline1\nline2\nline3\nline4\nline5\n");
         buf.place_cursor(&buf.iter_at_offset(0));
@@ -732,20 +671,17 @@ mod tests {
         assert_eq!(buf.iter_at_mark(&buf.get_insert()).line(), 1);
     }
 
-    #[test]
+    #[gtk::test]
     fn numerical_count_word_and_line_selection() {
-        if !ensure_gtk() {
-            return;
-        }
         let mut state = EditorState::new();
         let buf = buf_with("apple banana cherry date elderberry\nsecond line\nthird line\n");
         buf.place_cursor(&buf.iter_at_offset(0));
 
-        // 3w -> advance 3 words (to 'date')
+        // 3w -> advance 3 words (to 'cherry ')
         handle_key(&mut state, &buf, KeyEvent::char('3'));
         handle_key(&mut state, &buf, KeyEvent::char('w'));
         let (s, e) = buf.selection_bounds().unwrap();
-        assert_eq!(buf.text(&s, &e, false).as_str(), "date");
+        assert_eq!(buf.text(&s, &e, false).as_str(), "cherry ");
 
         // 2x -> select 2 lines
         buf.place_cursor(&buf.iter_at_offset(0));
@@ -758,11 +694,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[gtk::test]
     fn dynamic_on_next_key_custom_chars() {
-        if !ensure_gtk() {
-            return;
-        }
         let mut state = EditorState::new();
         let buf = buf_with("target text");
         state.set_mode(Mode::Select);
@@ -799,11 +732,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[gtk::test]
     fn named_register_yank_and_paste() {
-        if !ensure_gtk() {
-            return;
-        }
         let mut state = EditorState::new();
         let buf = buf_with("foo bar baz");
 
@@ -835,11 +765,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[gtk::test]
     fn black_hole_register_delete() {
-        if !ensure_gtk() {
-            return;
-        }
         let mut state = EditorState::new();
         let buf = buf_with("keep_me delete_me");
 
@@ -867,11 +794,8 @@ mod tests {
         assert_eq!(state.registers.read('"'), "keep_me");
     }
 
-    #[test]
+    #[gtk::test]
     fn yank_register_0_persists_across_deletes() {
-        if !ensure_gtk() {
-            return;
-        }
         let mut state = EditorState::new();
         let buf = buf_with("alpha beta gamma");
 
@@ -900,11 +824,8 @@ mod tests {
         assert!(buf.text(&buf.start_iter(), &buf.end_iter(), false).ends_with("alpha"));
     }
 
-    #[test]
+    #[gtk::test]
     fn shifted_register_yank_and_paste_in_normal_mode() {
-        if !ensure_gtk() {
-            return;
-        }
         let mut state = EditorState::new();
         let buf = buf_with("hello world");
         assert_eq!(state.mode, Mode::Normal);
@@ -952,11 +873,8 @@ mod tests {
         );
     }
 
-    #[test]
+    #[gtk::test]
     fn numbered_register_1_yank_and_paste_vs_default_register() {
-        if !ensure_gtk() {
-            return;
-        }
         let mut state = EditorState::new();
         let buf = buf_with("foo bar");
 
@@ -994,11 +912,8 @@ mod tests {
         assert!(buf.text(&buf.start_iter(), &buf.end_iter(), false).ends_with("foo"));
     }
 
-    #[test]
+    #[gtk::test]
     fn space_y_and_space_p_clipboard() {
-        if !ensure_gtk() {
-            return;
-        }
         let mut state = EditorState::new();
         let buf = buf_with("helix editor");
 
@@ -1023,7 +938,146 @@ mod tests {
             "helix editorhelix"
         );
     }
+
+    #[gtk::test]
+    fn paste_before_and_select_mode_paste() {
+        let mut state = EditorState::new();
+        let buf = buf_with("world");
+        state.registers.write('"', "hello ".to_string());
+
+        // 'P' in normal mode pastes before cursor
+        buf.place_cursor(&buf.iter_at_offset(0));
+        let res = handle_key(&mut state, &buf, KeyEvent::char('P'));
+        assert_eq!(res, KeyHandleResult::Stop);
+        assert_eq!(
+            buf.text(&buf.start_iter(), &buf.end_iter(), false).as_str(),
+            "hello world"
+        );
+
+        // In select mode, 'p' replaces selection and transitions to Normal
+        state.set_mode(Mode::Select);
+        buf.select_range(&buf.iter_at_offset(0), &buf.iter_at_offset(5)); // select "hello"
+        state.registers.write('"', "brave".to_string());
+        let res2 = handle_key(&mut state, &buf, KeyEvent::char('p'));
+        assert_eq!(res2, KeyHandleResult::ModeChanged(Mode::Normal));
+        assert_eq!(state.mode, Mode::Normal);
+        assert_eq!(
+            buf.text(&buf.start_iter(), &buf.end_iter(), false).as_str(),
+            "brave world"
+        );
+    }
+
+    #[gtk::test]
+    fn goto_motions_suite() {
+        let mut state = EditorState::new();
+        let buf = buf_with("    first line\n    second line\n    third line\n");
+
+        // 'g' 'e' -> end of file (last text line)
+        handle_key(&mut state, &buf, KeyEvent::char('g'));
+        let res = handle_key(&mut state, &buf, KeyEvent::char('e'));
+        assert_eq!(res, KeyHandleResult::Stop);
+        assert_eq!(buf.iter_at_mark(&buf.get_insert()).line(), 2);
+
+        // 'g' 'g' -> start of file
+        handle_key(&mut state, &buf, KeyEvent::char('g'));
+        let res2 = handle_key(&mut state, &buf, KeyEvent::char('g'));
+        assert_eq!(res2, KeyHandleResult::Stop);
+        assert_eq!(buf.iter_at_mark(&buf.get_insert()).offset(), 0);
+
+        // '2' 'g' 'g' -> goto line 2 (0-indexed line 1: "second line")
+        handle_key(&mut state, &buf, KeyEvent::char('2'));
+        handle_key(&mut state, &buf, KeyEvent::char('g'));
+        let res3 = handle_key(&mut state, &buf, KeyEvent::char('g'));
+        assert_eq!(res3, KeyHandleResult::Stop);
+        assert_eq!(buf.iter_at_mark(&buf.get_insert()).line(), 1);
+
+        // 'g' 'l' -> line end (last char of line before newline)
+        handle_key(&mut state, &buf, KeyEvent::char('g'));
+        handle_key(&mut state, &buf, KeyEvent::char('l'));
+        let mut next = buf.iter_at_mark(&buf.get_insert());
+        assert_eq!(next.char(), 'e');
+        next.forward_char();
+        assert!(next.ends_line());
+
+        // 'g' 'h' -> line start
+        handle_key(&mut state, &buf, KeyEvent::char('g'));
+        handle_key(&mut state, &buf, KeyEvent::char('h'));
+        assert_eq!(buf.iter_at_mark(&buf.get_insert()).line_offset(), 0);
+
+        // 'g' 's' -> first non-whitespace
+        handle_key(&mut state, &buf, KeyEvent::char('g'));
+        handle_key(&mut state, &buf, KeyEvent::char('s'));
+        assert_eq!(buf.iter_at_mark(&buf.get_insert()).line_offset(), 4);
+    }
+
+    #[gtk::test]
+    fn editing_primitives_suite() {
+        let mut state = EditorState::new();
+        let buf = buf_with("  hello world\n");
+        buf.place_cursor(&buf.iter_at_offset(4));
+
+        // 'o' -> open below, preserving indent, enters insert mode
+        let res_o = handle_key(&mut state, &buf, KeyEvent::char('o'));
+        assert_eq!(res_o, KeyHandleResult::ModeChanged(Mode::Insert));
+        assert_eq!(state.mode, Mode::Insert);
+        assert_eq!(buf.iter_at_mark(&buf.get_insert()).line(), 1);
+        assert_eq!(buf.iter_at_mark(&buf.get_insert()).line_offset(), 2);
+        assert_eq!(
+            buf.text(&buf.start_iter(), &buf.end_iter(), false).as_str(),
+            "  hello world\n  \n"
+        );
+
+        // Esc back to normal
+        handle_key(&mut state, &buf, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+        assert_eq!(state.mode, Mode::Normal);
+
+        // 'O' -> open above
+        let res_big_o = handle_key(&mut state, &buf, KeyEvent::char('O'));
+        assert_eq!(res_big_o, KeyHandleResult::ModeChanged(Mode::Insert));
+        assert_eq!(state.mode, Mode::Insert);
+        assert_eq!(buf.iter_at_mark(&buf.get_insert()).line(), 1);
+        assert_eq!(buf.iter_at_mark(&buf.get_insert()).line_offset(), 2);
+
+        // Esc back to normal
+        handle_key(&mut state, &buf, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+
+        // '%' -> select all
+        let res_pct = handle_key(&mut state, &buf, KeyEvent::char('%'));
+        assert_eq!(res_pct, KeyHandleResult::Stop);
+        let (s, e) = buf.selection_bounds().unwrap();
+        assert_eq!(s.offset(), 0);
+        assert_eq!(e.offset(), buf.end_iter().offset());
+
+        // ';' -> collapse selection to head
+        let res_semi = handle_key(&mut state, &buf, KeyEvent::char(';'));
+        assert_eq!(res_semi, KeyHandleResult::Stop);
+        assert!(!buf.has_selection());
+
+        // Alt-; -> flip selection
+        buf.select_range(&buf.iter_at_offset(2), &buf.iter_at_offset(5));
+        let res_alt_semi = handle_key(
+            &mut state,
+            &buf,
+            KeyEvent::new(KeyCode::Char(';'), KeyModifiers::ALT),
+        );
+        assert_eq!(res_alt_semi, KeyHandleResult::Stop);
+        assert_eq!(buf.iter_at_mark(&buf.get_insert()).offset(), 5);
+        assert_eq!(buf.iter_at_mark(&buf.selection_bound()).offset(), 2);
+
+        // 'r' -> replace char under cursor
+        buf.place_cursor(&buf.iter_at_offset(2)); // on 'h' of "  hello"
+        let res_r = handle_key(&mut state, &buf, KeyEvent::char('r'));
+        assert_eq!(res_r, KeyHandleResult::Stop);
+        let res_r_char = handle_key(&mut state, &buf, KeyEvent::char('H'));
+        assert_eq!(res_r_char, KeyHandleResult::Stop);
+        let first_line = buf.text(&buf.iter_at_offset(2), &buf.iter_at_offset(7), false);
+        assert_eq!(first_line.as_str(), "Hello");
+
+        // '~' -> switch case
+        buf.place_cursor(&buf.iter_at_offset(2)); // on 'H'
+        let res_tilde = handle_key(&mut state, &buf, KeyEvent::char('~'));
+        assert_eq!(res_tilde, KeyHandleResult::Stop);
+        let char_after_tilde = buf.text(&buf.iter_at_offset(2), &buf.iter_at_offset(3), false);
+        assert_eq!(char_after_tilde.as_str(), "h");
+    }
 }
-
-
-

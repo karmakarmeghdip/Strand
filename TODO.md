@@ -64,7 +64,7 @@ src/lsp/                                helix-lsp/
 ### Phase 6: Core Editing & Motion Parity with Helix (Refactor & Features)
 *Goal: Fix behavioral discrepancies identified during code review and bring single-buffer editing to full Helix baseline.*
 
-- [ ] **6.1 Fix & refine paste semantics (`paste_before` vs `paste_after` & Linewise paste)**
+- [x] **6.1 Fix & refine paste semantics (`paste_before` vs `paste_after` & Linewise paste)**
   - **Priority**: P1 (Immediate Refactor)
   - **Files**: `src/core/movement.rs`, `src/commands/edit.rs`, `src/keymap/trie.rs`
   - **Details**:
@@ -74,7 +74,7 @@ src/lsp/                                helix-lsp/
     - Map `P` (`EditorAction::PasteBefore`) in Normal mode keybindings.
   - **Verification**: Dedicated tests for point-cursor paste, selection-replacement paste, and multiline paste.
 
-- [ ] **6.2 Complete Helix `Goto` motion suite (`g` prefix)**
+- [x] **6.2 Complete Helix `Goto` motion suite (`g` prefix)**
   - **Priority**: P1 (Feature)
   - **Files**: `src/core/movement.rs`, `src/commands/motion.rs`, `src/keymap/actions.rs`, `src/keymap/trie.rs`
   - **Details**:
@@ -85,7 +85,7 @@ src/lsp/                                helix-lsp/
     - Expose actions in `EditorAction` and wire them into `build_goto_node()`.
   - **Verification**: Unit tests covering `gh`, `gl`, `gs`, `ge`, and `gg` with and without numerical count.
 
-- [ ] **6.3 Essential Helix editing primitives (`o`/`O`, `r`, `%`, `;`, `Alt-;`, `~`)**
+- [x] **6.3 Essential Helix editing primitives (`o`/`O`, `r`, `%`, `;`, `Alt-;`, `~`)**
   - **Priority**: P1 (Feature)
   - **Files**: `src/core/movement.rs`, `src/commands/edit.rs`, `src/keymap/actions.rs`, `src/keymap/trie.rs`
   - **Details**:
@@ -97,7 +97,7 @@ src/lsp/                                helix-lsp/
     - `~`: toggle case of characters in active selection.
   - **Verification**: Unit tests for each editing primitive verifying buffer text, cursor position, and mode transitions.
 
-- [ ] **6.4 GTK Test Suite Serialization & Hardening**
+- [x] **6.4 GTK Test Suite Serialization & Hardening**
   - **Priority**: P1 (Refactor & Test Reliability)
   - **Files**: `src/components/editor/controller.rs`, `src/core/movement.rs`, `src/components/statusline/mod.rs`
   - **Details**:

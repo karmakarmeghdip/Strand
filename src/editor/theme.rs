@@ -182,25 +182,8 @@ mod tests {
         assert!(!CatppuccinFlavor::Latte.is_dark());
     }
 
-    fn ensure_gtk() -> bool {
-        static GTK_INIT: Once = Once::new();
-        GTK_INIT.call_once(|| {
-            let _ = std::panic::catch_unwind(|| gtk::init());
-        });
-        if !gtk::is_initialized() {
-            return false;
-        }
-        std::panic::catch_unwind(|| {
-            let _ = sourceview5::StyleSchemeManager::default();
-        })
-        .is_ok()
-    }
-
-    #[test]
+    #[gtk::test]
     fn test_theme_gtk() {
-        if !ensure_gtk() {
-            return;
-        }
         let manager = sourceview5::StyleSchemeManager::default();
         init_style_schemes(&manager);
 

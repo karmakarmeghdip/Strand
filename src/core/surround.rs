@@ -115,31 +115,14 @@ pub fn surround_replace(buffer: &impl IsA<TextBuffer>, from: char, to: char) {
 mod tests {
     use super::*;
 
-    fn ensure_gtk() -> bool {
-        static INIT: std::sync::Once = std::sync::Once::new();
-        INIT.call_once(|| {
-            let _ = std::panic::catch_unwind(|| gtk::init());
-        });
-        if !gtk::is_initialized() {
-            return false;
-        }
-        std::panic::catch_unwind(|| {
-            let _ = gtk::TextBuffer::new(None);
-        })
-        .is_ok()
-    }
-
     fn make_buffer(text: &str) -> TextBuffer {
         let buf = TextBuffer::new(None);
         buf.set_text(text);
         buf
     }
 
-    #[test]
+    #[gtk::test]
     fn test_surround_lifecycle() {
-        if !ensure_gtk() {
-            return;
-        }
         let buf = make_buffer("hello world");
         buf.select_range(&buf.iter_at_offset(5), &buf.iter_at_offset(0));
         surround_add(&buf, '(');

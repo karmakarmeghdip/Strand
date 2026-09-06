@@ -236,37 +236,31 @@ mod tests {
     use super::*;
     use crate::components::which_key::WhichKeyEntry;
 
-    #[test]
+    #[gtk::test]
     fn test_which_key_view_lifecycle() {
-        let _ = std::panic::catch_unwind(|| {
-            if !gtk::is_initialized() {
-                return;
-            }
+        let view = WhichKeyView::new();
+        assert!(!view.is_visible());
 
-            let view = WhichKeyView::new();
-            assert!(!view.is_visible());
+        let data = WhichKeyData {
+            title: "Test Space".to_string(),
+            entries: vec![
+                WhichKeyEntry {
+                    key_label: "y".to_string(),
+                    description: "yank to clipboard".to_string(),
+                    is_submenu: false,
+                },
+                WhichKeyEntry {
+                    key_label: "w".to_string(),
+                    description: "window".to_string(),
+                    is_submenu: true,
+                },
+            ],
+        };
 
-            let data = WhichKeyData {
-                title: "Test Space".to_string(),
-                entries: vec![
-                    WhichKeyEntry {
-                        key_label: "y".to_string(),
-                        description: "yank to clipboard".to_string(),
-                        is_submenu: false,
-                    },
-                    WhichKeyEntry {
-                        key_label: "w".to_string(),
-                        description: "window".to_string(),
-                        is_submenu: true,
-                    },
-                ],
-            };
+        view.show(&data);
+        assert!(view.is_visible());
 
-            view.show(&data);
-            assert!(view.is_visible());
-
-            view.hide();
-            assert!(!view.is_visible());
-        });
+        view.hide();
+        assert!(!view.is_visible());
     }
 }

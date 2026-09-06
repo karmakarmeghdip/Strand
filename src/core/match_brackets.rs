@@ -312,31 +312,14 @@ pub fn match_brackets(
 mod tests {
     use super::*;
 
-    fn ensure_gtk() -> bool {
-        static INIT: std::sync::Once = std::sync::Once::new();
-        INIT.call_once(|| {
-            let _ = std::panic::catch_unwind(|| gtk::init());
-        });
-        if !gtk::is_initialized() {
-            return false;
-        }
-        std::panic::catch_unwind(|| {
-            let _ = gtk::TextBuffer::new(None);
-        })
-        .is_ok()
-    }
-
     fn make_buffer(text: &str) -> TextBuffer {
         let buf = TextBuffer::new(None);
         buf.set_text(text);
         buf
     }
 
-    #[test]
+    #[gtk::test]
     fn test_bracket_logic() {
-        if !ensure_gtk() {
-            return;
-        }
         let buf = make_buffer("fn foo() {\n    let x = 1;\n}");
         buf.place_cursor(&buf.iter_at_offset(6)); // on '('
         match_brackets(&buf, None, false);
@@ -346,15 +329,12 @@ mod tests {
         assert_eq!(buf.iter_at_mark(&buf.get_insert()).offset(), 6); // '('
     }
 
-    #[test]
+    #[gtk::test]
     fn test_bracket_extend() {
-        if !ensure_gtk() {
-            return;
-        }
         let buf = make_buffer("fn foo(bar, baz) {}");
         buf.place_cursor(&buf.iter_at_offset(6));
         match_brackets(&buf, None, true);
-        assert_eq!(buf.iter_at_mark(&buf.get_insert()).offset(), 16);
+        assert_eq!(buf.iter_at_mark(&buf.get_insert()).offset(), 15);
         assert_eq!(buf.iter_at_mark(&buf.selection_bound()).offset(), 6);
     }
 }

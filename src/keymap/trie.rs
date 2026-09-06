@@ -405,11 +405,28 @@ pub fn build_space_node() -> KeyTrieNode {
     space_node
 }
 
+/// Helper to construct Helix goto mode node:
+/// - `g` -> goto file start (or line n if count provided)
+/// - `e` -> goto file end
+/// - `h` -> goto line start
+/// - `l` -> goto line end
+/// - `s` -> goto first non-whitespace
+pub fn build_goto_node() -> KeyTrieNode {
+    let mut goto_node = KeyTrieNode::new("Goto");
+    let leaf = |a| KeyTrie::Leaf(a);
+    goto_node.insert(KeyEvent::char('g'), leaf(EditorAction::GotoFileStart));
+    goto_node.insert(KeyEvent::char('e'), leaf(EditorAction::GotoFileEnd));
+    goto_node.insert(KeyEvent::char('h'), leaf(EditorAction::GotoLineStart));
+    goto_node.insert(KeyEvent::char('l'), leaf(EditorAction::GotoLineEnd));
+    goto_node.insert(KeyEvent::char('s'), leaf(EditorAction::GotoFirstNonWhitespace));
+    goto_node
+}
+
 /// Build the default Phase-2 keymap.
 ///
 /// Normal:
-///   h/j/k/l, w/b/e, x, i, d/c/y/p, v, Esc
-///   g -> goto node (g g = file start, g e = file end for demo; extensible)
+///   h/j/k/l, w/b/e, x, i, d/c/y/p/P, v, Esc
+///   g -> goto node (gg = file start, ge = file end, gh/gl = line start/end, gs = non-ws)
 ///   m -> match node (mm = match brackets, ms = surround add, mr = replace, md = delete, ma/mi = textobjects)
 ///   Space -> space node (y = yank to clipboard, p/P = paste from clipboard)
 /// Insert:
@@ -441,16 +458,24 @@ pub fn default_keymap() -> HashMap<Mode, KeyTrie> {
     normal.insert(KeyEvent::char('c'), leaf(EditorAction::ChangeSelection));
     normal.insert(KeyEvent::char('y'), leaf(EditorAction::YankSelection));
     normal.insert(KeyEvent::char('p'), leaf(EditorAction::PasteAfter));
+    normal.insert(KeyEvent::char('P'), leaf(EditorAction::PasteBefore));
     normal.insert(KeyEvent::char('u'), leaf(EditorAction::Undo));
     normal.insert(KeyEvent::char('U'), leaf(EditorAction::Redo));
     normal.insert(KeyEvent::char('"'), leaf(EditorAction::SelectRegister));
+    normal.insert(KeyEvent::char('o'), leaf(EditorAction::OpenBelow));
+    normal.insert(KeyEvent::char('O'), leaf(EditorAction::OpenAbove));
+    normal.insert(KeyEvent::char('r'), leaf(EditorAction::Replace));
+    normal.insert(KeyEvent::char('%'), leaf(EditorAction::SelectAll));
+    normal.insert(KeyEvent::char(';'), leaf(EditorAction::CollapseSelection));
+    normal.insert(
+        KeyEvent::new(KeyCode::Char(';'), KeyModifiers::ALT),
+        leaf(EditorAction::FlipSelection),
+    );
+    normal.insert(KeyEvent::char('~'), leaf(EditorAction::ToggleCase));
     // Esc handled specially in get().
 
     // g prefix
-    let mut goto_node = KeyTrieNode::new("Goto");
-    goto_node.insert(KeyEvent::char('g'), leaf(EditorAction::MoveLeft)); // placeholder: gg
-    goto_node.insert(KeyEvent::char('e'), leaf(EditorAction::MoveWordEnd)); // ge
-    normal.insert(KeyEvent::char('g'), KeyTrie::Node(goto_node));
+    normal.insert(KeyEvent::char('g'), KeyTrie::Node(build_goto_node()));
 
     // m prefix (Helix match mode)
     normal.insert(KeyEvent::char('m'), KeyTrie::Node(build_match_node()));
@@ -501,11 +526,23 @@ pub fn default_keymap() -> HashMap<Mode, KeyTrie> {
     select.insert(KeyEvent::char('x'), leaf(EditorAction::SelectLine));
     select.insert(KeyEvent::char('I'), leaf(EditorAction::InsertAtLineStart));
     select.insert(KeyEvent::char('A'), leaf(EditorAction::InsertAtLineEnd));
-    // d/y/c still meaningful in select
     select.insert(KeyEvent::char('d'), leaf(EditorAction::DeleteSelection));
     select.insert(KeyEvent::char('c'), leaf(EditorAction::ChangeSelection));
     select.insert(KeyEvent::char('y'), leaf(EditorAction::YankSelection));
+    select.insert(KeyEvent::char('p'), leaf(EditorAction::PasteAfter));
+    select.insert(KeyEvent::char('P'), leaf(EditorAction::PasteBefore));
     select.insert(KeyEvent::char('"'), leaf(EditorAction::SelectRegister));
+    select.insert(KeyEvent::char('o'), leaf(EditorAction::OpenBelow));
+    select.insert(KeyEvent::char('O'), leaf(EditorAction::OpenAbove));
+    select.insert(KeyEvent::char('r'), leaf(EditorAction::Replace));
+    select.insert(KeyEvent::char('%'), leaf(EditorAction::SelectAll));
+    select.insert(KeyEvent::char(';'), leaf(EditorAction::CollapseSelection));
+    select.insert(
+        KeyEvent::new(KeyCode::Char(';'), KeyModifiers::ALT),
+        leaf(EditorAction::FlipSelection),
+    );
+    select.insert(KeyEvent::char('~'), leaf(EditorAction::ToggleCase));
+    select.insert(KeyEvent::char('g'), KeyTrie::Node(build_goto_node()));
     select.insert(
         KeyEvent::new(KeyCode::Left, KeyModifiers::empty()),
         leaf(EditorAction::MoveLeft),
@@ -680,7 +717,7 @@ mod tests {
         assert!(matches!(res, KeymapResult::Pending(_)));
         // g g should match
         let res2 = trie.get(Mode::Normal, KeyEvent::char('g'));
-        assert_eq!(res2, KeymapResult::Matched(EditorAction::MoveLeft));
+        assert_eq!(res2, KeymapResult::Matched(EditorAction::GotoFileStart));
         // Reset pending is cleared
         assert!(trie.pending().is_empty());
     }

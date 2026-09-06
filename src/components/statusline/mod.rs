@@ -24,38 +24,18 @@ mod tests {
     use gtk::prelude::*;
     use crate::keymap::Mode;
 
-    fn ensure_gtk() -> bool {
-        static INIT: std::sync::Once = std::sync::Once::new();
-        INIT.call_once(|| {
-            let _ = std::panic::catch_unwind(|| gtk::init());
-        });
-        if !gtk::is_initialized() {
-            return false;
-        }
-        std::panic::catch_unwind(|| {
-            let _ = gtk::TextBuffer::new(None);
-        })
-        .is_ok()
-    }
-
-    #[test]
+    #[gtk::test]
     fn test_vcs_branch_icon_available() {
-        if !ensure_gtk() {
-            return;
+        if let Some(display) = gtk::gdk::Display::default() {
+            let icon_theme = gtk::IconTheme::for_display(&display);
+            icon_theme.add_search_path("data/icons");
+            println!("has_icon: {}", icon_theme.has_icon("vcs-branch-symbolic"));
+            assert!(icon_theme.has_icon("vcs-branch-symbolic"));
         }
-        let display = gtk::gdk::Display::default().unwrap();
-        let icon_theme = gtk::IconTheme::for_display(&display);
-        icon_theme.add_search_path("data/icons");
-        println!("has_icon: {}", icon_theme.has_icon("vcs-branch-symbolic"));
-        assert!(icon_theme.has_icon("vcs-branch-symbolic"));
     }
 
-    #[test]
+    #[gtk::test]
     fn test_statusline_view_lifecycle() {
-        if !ensure_gtk() {
-            return;
-        }
-
         let config = StatusLineConfig::default();
         let statusline = StatusLineView::new(config);
 
@@ -109,12 +89,8 @@ mod tests {
         statusline.set_lsp_progress(false, None, None);
     }
 
-    #[test]
+    #[gtk::test]
     fn test_statusline_buffer_integration() {
-        if !ensure_gtk() {
-            return;
-        }
-
         let config = StatusLineConfig::default();
         let statusline = StatusLineView::new(config);
 
@@ -133,12 +109,8 @@ mod tests {
         statusline.update_cursor_coordinates(&buffer);
     }
 
-    #[test]
+    #[gtk::test]
     fn test_statusline_pending_formatting() {
-        if !ensure_gtk() {
-            return;
-        }
-
         let config = StatusLineConfig::default();
         let statusline = StatusLineView::new(config);
 
@@ -154,12 +126,8 @@ mod tests {
         statusline.set_pending(None, "", None);
     }
 
-    #[test]
+    #[gtk::test]
     fn test_statusline_echo_generation() {
-        if !ensure_gtk() {
-            return;
-        }
-
         let config = StatusLineConfig::default();
         let statusline = StatusLineView::new(config);
 
@@ -174,12 +142,8 @@ mod tests {
         assert_eq!(statusline.echo_generation(), 3);
     }
 
-    #[test]
+    #[gtk::test]
     fn test_statusline_custom_mode_config() {
-        if !ensure_gtk() {
-            return;
-        }
-
         let mut config = StatusLineConfig::default();
         config.mode.normal = "NORMAL".to_string();
         config.mode.insert = "INSERT".to_string();
