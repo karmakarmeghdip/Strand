@@ -9,17 +9,21 @@ use sourceview5::prelude::{BufferExt, ViewExt};
 
 use crate::components::editor::state::EditorState;
 use crate::components::editor::{apply_theme, handle_key, KeyHandleResult, CATPPUCCIN_MOCHA};
+use crate::components::which_key::{WhichKeyData, WhichKeyView};
 use crate::keymap::trie::gdk_key_to_event;
 use crate::keymap::Mode;
 
 pub struct App {
     mode: Mode,
     editor_state: Rc<RefCell<EditorState>>,
+    which_key: Option<WhichKeyData>,
 }
 
 #[derive(Debug)]
 pub enum AppMsg {
     ModeChanged(Mode),
+    ShowWhichKey(WhichKeyData),
+    HideWhichKey,
     #[allow(dead_code)]
     Noop,
 }
@@ -30,6 +34,7 @@ pub struct AppWidgets {
     #[allow(dead_code)]
     buffer: sourceview5::Buffer,
     title: adw::WindowTitle,
+    which_key_view: WhichKeyView,
     #[allow(dead_code)]
     editor_state: Rc<RefCell<EditorState>>,
 }
@@ -66,6 +71,7 @@ impl SimpleComponent for App {
         let model = App {
             mode: Mode::Normal,
             editor_state: editor_state.clone(),
+            which_key: None,
         };
 
         // ----- GtkSourceBuffer: single source of truth (Invariant #1) -----
@@ -136,6 +142,15 @@ fn main() {
         // GTK4 single-child uses set_child(), not pack_start/show_all.
         scrolled.set_child(Some(&source_view));
 
+        // ----- Which-Key Floating HUD Overlay -----
+        let which_key_view = WhichKeyView::new();
+        let overlay = gtk::Overlay::builder()
+            .hexpand(true)
+            .vexpand(true)
+            .build();
+        overlay.set_child(Some(&scrolled));
+        overlay.add_overlay(which_key_view.widget());
+
         // ----- AdwHeaderBar -----
         let header = adw::HeaderBar::new();
         let title = adw::WindowTitle::new("Strand", mode_title(Mode::Normal));
@@ -146,7 +161,7 @@ fn main() {
             .orientation(gtk::Orientation::Vertical)
             .build();
         vbox.append(&header);
-        vbox.append(&scrolled);
+        vbox.append(&overlay);
 
         // AdwApplicationWindow is single-child via set_content().
         window.set_content(Some(&vbox));
@@ -159,13 +174,14 @@ fn main() {
 
         // ----- Modal engine: GtkEventControllerKey at CAPTURE (fast path) -----
         // Invariant #2: per-keystroke motions are imperative on GtkTextBuffer;
-        // Relm4 messages only for structural transitions (mode switches).
+        // Relm4 messages only for structural transitions (mode switches, which-key).
         let key_controller = gtk::EventControllerKey::new();
         key_controller.set_propagation_phase(gtk::PropagationPhase::Capture);
         let state_for_key = editor_state.clone();
         let buffer_for_key = buffer.clone();
         let title_for_key = title.clone();
         let source_view_for_key = source_view.clone();
+        let which_key_view_for_key = which_key_view.clone();
         let sender_for_key = sender.clone();
         key_controller.connect_key_pressed(move |_, keyval, _keycode, state| {
             let mode = state_for_key.borrow().mode;
@@ -179,7 +195,21 @@ fn main() {
                 return glib::Propagation::Stop;
             };
 
+            let old_which_key = state_for_key.borrow().which_key.clone();
             let result = handle_key(&mut state_for_key.borrow_mut(), &buffer_for_key, key);
+
+            // Sync Which-Key presentation
+            let new_which_key = state_for_key.borrow().which_key.clone();
+            if new_which_key != old_which_key {
+                if let Some(ref data) = new_which_key {
+                    which_key_view_for_key.show(data);
+                    sender_for_key.input(AppMsg::ShowWhichKey(data.clone()));
+                } else {
+                    which_key_view_for_key.hide();
+                    sender_for_key.input(AppMsg::HideWhichKey);
+                }
+            }
+
             match result {
                 KeyHandleResult::Propagate => glib::Propagation::Proceed,
                 KeyHandleResult::Stop => glib::Propagation::Stop,
@@ -202,6 +232,7 @@ fn main() {
             source_view,
             buffer,
             title,
+            which_key_view,
             editor_state,
         };
 
@@ -214,6 +245,12 @@ fn main() {
                 self.mode = mode;
                 self.editor_state.borrow_mut().mode = mode;
             }
+            AppMsg::ShowWhichKey(data) => {
+                self.which_key = Some(data);
+            }
+            AppMsg::HideWhichKey => {
+                self.which_key = None;
+            }
             AppMsg::Noop => {}
         }
     }
@@ -221,5 +258,10 @@ fn main() {
     fn update_view(&self, widgets: &mut Self::Widgets, _sender: ComponentSender<Self>) {
         widgets.source_view.set_overwrite(self.mode == Mode::Normal);
         widgets.title.set_subtitle(mode_title(self.mode));
+        if let Some(ref data) = self.which_key {
+            widgets.which_key_view.show(data);
+        } else {
+            widgets.which_key_view.hide();
+        }
     }
 }

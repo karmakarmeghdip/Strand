@@ -1,6 +1,7 @@
 use std::num::NonZeroUsize;
 
 use crate::components::editor::controller::KeyHandleResult;
+use crate::components::which_key::WhichKeyData;
 use crate::editor::register::Registers;
 use crate::keymap::{default_keymap, KeyEvent, KeyTrieRoot, Mode};
 
@@ -15,6 +16,7 @@ pub struct EditorState {
     pub last_matched_bracket: Option<i32>,
     pub count: Option<NonZeroUsize>,
     pub on_next_key: Option<OnKeyCallback>,
+    pub which_key: Option<WhichKeyData>,
 }
 
 impl EditorState {
@@ -27,6 +29,7 @@ impl EditorState {
             last_matched_bracket: None,
             count: None,
             on_next_key: None,
+            which_key: None,
         }
     }
 
@@ -42,6 +45,7 @@ impl EditorState {
         self.count = None;
         self.on_next_key = None;
         self.selected_register = None;
+        self.which_key = None;
     }
 
     pub fn on_next_key<F>(&mut self, f: F)

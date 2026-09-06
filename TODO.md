@@ -155,7 +155,7 @@ src/components/                         helix-term/ui/ & compositor.rs
       - Document path / name.
     - Relieve `AdwWindowTitle` of acting as the sole mode indicator.
 
-- [ ] **5.2 Phase 3: Which-Key Overlay (`src/components/which_key/`)**
+- [x] **5.2 Phase 3: Which-Key Overlay (`src/components/which_key/`)**
   - **Priority**: P3
   - **Dependencies**: 3.1
   - **Details**:

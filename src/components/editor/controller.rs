@@ -30,11 +30,16 @@ where
     crate::keymap::canonicalize_key(&mut key);
     let buffer = buffer.as_ref();
 
-    // Esc: cancel any pending on_next_key, count, pending chords, selected register, and return to Normal mode.
-    if key.code == crate::keymap::trie::KeyCode::Esc {
+    // Esc or Ctrl-g: cancel any pending on_next_key, count, pending chords, selected register, and return to Normal mode.
+    let is_cancel = key.code == crate::keymap::trie::KeyCode::Esc
+        || (key.code == crate::keymap::trie::KeyCode::Char('g')
+            && key.modifiers.contains(crate::keymap::KeyModifiers::CONTROL));
+
+    if is_cancel {
         state.on_next_key = None;
         state.count = None;
         state.selected_register = None;
+        state.which_key = None;
         if !state.keymap.pending().is_empty() {
             state.keymap.clear_pending();
             return KeyHandleResult::Stop;
@@ -50,6 +55,7 @@ where
 
     // Dynamic on_next_key callback (Helix style)
     if let Some(cb) = state.on_next_key.take() {
+        state.which_key = None;
         return cb(state, buffer, key);
     }
 
@@ -81,23 +87,31 @@ where
     let result = state.keymap.get(state.mode, key);
 
     match result {
-        KeymapResult::Pending(_) => {
-            // Chord pending — consume, keep count active
+        KeymapResult::Pending(node) => {
+            // Chord pending — update which-key, keep count active
+            state.which_key = Some(crate::components::which_key::WhichKeyData::from_trie_node(&node));
             KeyHandleResult::Stop
         }
         KeymapResult::Cancelled(_) => {
-            // Invalid chord — reset count and selected register
+            // Invalid chord — reset count, selected register, and which-key
             state.count = None;
             state.selected_register = None;
+            state.which_key = None;
             KeyHandleResult::Stop
         }
         KeymapResult::NotFound => {
             // In Normal/Select, unknown keys are swallowed to prevent insertion
             state.count = None;
             state.selected_register = None;
+            state.which_key = None;
             KeyHandleResult::Stop
         }
         KeymapResult::Matched(action) => {
+            state.which_key = state
+                .keymap
+                .sticky
+                .as_ref()
+                .map(crate::components::which_key::WhichKeyData::from_trie_node);
             let count = state.count.take().map_or(1, |c| c.get());
             let register = state.selected_register.take().unwrap_or('"');
             let mut cx = crate::commands::Context::new(state, buffer, count, register);
@@ -247,6 +261,8 @@ mod tests {
         let res = handle_key(&mut state, &buf, KeyEvent::char('g'));
         assert_eq!(res, KeyHandleResult::Stop);
         assert!(!state.keymap.pending().is_empty());
+        assert!(state.which_key.is_some());
+        assert_eq!(state.which_key.as_ref().unwrap().title, "Goto");
         // Esc cancels
         let res2 = handle_key(
             &mut state,
@@ -254,7 +270,73 @@ mod tests {
             KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()),
         );
         assert!(state.keymap.pending().is_empty());
+        assert!(state.which_key.is_none());
         let _ = res2;
+    }
+
+    #[test]
+    fn which_key_space_g_m_and_chord_completion() {
+        if !ensure_gtk() { return; }
+        let mut state = EditorState::new();
+        let buf = buf_with("hello world");
+
+        // Space triggers Which-Key
+        handle_key(&mut state, &buf, KeyEvent::char(' '));
+        assert!(state.which_key.is_some());
+        let space_wk = state.which_key.as_ref().unwrap();
+        assert_eq!(space_wk.title, "Space");
+        assert!(space_wk.entries.iter().any(|e| e.key_label == "y"));
+
+        // Completing chord with 'y' clears Which-Key
+        handle_key(&mut state, &buf, KeyEvent::char('y'));
+        assert!(state.which_key.is_none());
+        assert!(state.keymap.pending().is_empty());
+
+        // 'm' triggers Match Which-Key
+        handle_key(&mut state, &buf, KeyEvent::char('m'));
+        assert!(state.which_key.is_some());
+        assert_eq!(state.which_key.as_ref().unwrap().title, "Match");
+
+        // Completing with 'm' (match brackets) clears Which-Key
+        handle_key(&mut state, &buf, KeyEvent::char('m'));
+        assert!(state.which_key.is_none());
+    }
+
+    #[test]
+    fn which_key_ctrl_g_dismisses() {
+        if !ensure_gtk() { return; }
+        let mut state = EditorState::new();
+        let buf = buf_with("hello");
+
+        // Open space which-key
+        handle_key(&mut state, &buf, KeyEvent::char(' '));
+        assert!(state.which_key.is_some());
+
+        // Ctrl-g cancels
+        let ctrl_g = KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL);
+        handle_key(&mut state, &buf, ctrl_g);
+        assert!(state.which_key.is_none());
+        assert!(state.keymap.pending().is_empty());
+    }
+
+    #[test]
+    fn which_key_registers_lifecycle() {
+        if !ensure_gtk() { return; }
+        let mut state = EditorState::new();
+        state.registers.write('"', "yanked text");
+        let buf = buf_with("hello");
+
+        // Pressing '"' opens Registers Which-Key
+        handle_key(&mut state, &buf, KeyEvent::char('"'));
+        assert!(state.which_key.is_some());
+        let reg_wk = state.which_key.as_ref().unwrap();
+        assert_eq!(reg_wk.title, "Registers");
+        assert!(reg_wk.entries.iter().any(|e| e.key_label == "\""));
+
+        // Pressing register char '0' selects register and closes Which-Key
+        handle_key(&mut state, &buf, KeyEvent::char('0'));
+        assert!(state.which_key.is_none());
+        assert_eq!(state.selected_register, Some('0'));
     }
 
     #[test]

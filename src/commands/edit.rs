@@ -165,7 +165,11 @@ pub fn redo(cx: &mut Context) -> KeyHandleResult {
 }
 
 pub fn select_register(cx: &mut Context) -> KeyHandleResult {
+    cx.state.which_key = Some(crate::components::which_key::WhichKeyData::from_registers(
+        &cx.state.registers,
+    ));
     cx.on_next_key(|state, _buf, key| {
+        state.which_key = None;
         if let KeyCode::Char(ch) = key.code {
             state.selected_register = Some(ch);
         }

@@ -206,6 +206,16 @@ impl KeyTrieNode {
     pub fn insert(&mut self, key: KeyEvent, trie: KeyTrie) {
         self.map.insert(key, trie);
     }
+
+    /// Generate Which-Key presentation data, mirroring Helix's `KeyTrieNode::infobox()`.
+    pub fn which_key_data(&self) -> crate::components::which_key::WhichKeyData {
+        crate::components::which_key::WhichKeyData::from_trie_node(self)
+    }
+
+    /// Alias for `which_key_data()` matching Helix naming.
+    pub fn infobox(&self) -> crate::components::which_key::WhichKeyData {
+        self.which_key_data()
+    }
 }
 
 impl KeyTrie {
@@ -257,8 +267,11 @@ impl KeyTrieRoot {
     }
 
     pub fn get(&mut self, mode: Mode, key: KeyEvent) -> KeymapResult {
-        // Esc always cancels pending and clears sticky.
-        if key.code == KeyCode::Esc {
+        // Esc or Ctrl-g always cancels pending and clears sticky.
+        let is_cancel = key.code == KeyCode::Esc
+            || (key.code == KeyCode::Char('g') && key.modifiers.contains(KeyModifiers::CONTROL));
+
+        if is_cancel {
             if !self.pending.is_empty() {
                 let cancelled = self.pending.drain(..).collect();
                 return KeymapResult::Cancelled(cancelled);

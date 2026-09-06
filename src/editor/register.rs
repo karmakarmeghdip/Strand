@@ -76,6 +76,59 @@ impl Registers {
         self.inner.insert('+', text.clone());
         self.inner.insert('*', text);
     }
+
+    /// Iterator/list of register previews for Which-Key / info display, mirroring Helix.
+    pub fn iter_preview(&self) -> Vec<(char, String)> {
+        let mut result = Vec::new();
+
+        let sanitize = |s: &str| -> String {
+            if s.is_empty() {
+                "<empty>".to_string()
+            } else {
+                let first_line = s.lines().next().unwrap_or("").trim();
+                if first_line.chars().count() > 30 {
+                    let truncated: String = first_line.chars().take(30).collect();
+                    format!("{truncated}...")
+                } else {
+                    first_line.to_string()
+                }
+            }
+        };
+
+        // Default register '"'
+        let def = self.read('"');
+        result.push(('"', format!("default: {}", sanitize(def))));
+
+        // Yank register '0'
+        let yank = self.read('0');
+        result.push(('0', format!("yank: {}", sanitize(yank))));
+
+        // System clipboard '+'
+        let clip = self.read('+');
+        result.push(('+', format!("system: {}", sanitize(clip))));
+
+        // Primary selection '*'
+        let prim = self.read('*');
+        result.push(('*', format!("primary: {}", sanitize(prim))));
+
+        // Black hole '_'
+        result.push(('_', "<black hole>".to_string()));
+
+        // Other named registers
+        let mut keys: Vec<char> = self
+            .inner
+            .keys()
+            .copied()
+            .filter(|c| !matches!(c, '"' | '0' | '+' | '*' | '_'))
+            .collect();
+        keys.sort_unstable();
+        for k in keys {
+            let val = self.read(k);
+            result.push((k, sanitize(val)));
+        }
+
+        result
+    }
 }
 
 #[cfg(test)]
@@ -139,5 +192,19 @@ mod tests {
         assert_eq!(reg.read('x'), "first");
         reg.write('x', "second");
         assert_eq!(reg.read('x'), "second");
+    }
+
+    #[test]
+    fn test_iter_preview() {
+        let mut reg = Registers::new();
+        reg.write('"', "hello\nworld");
+        reg.write('0', "yanked text");
+        reg.write('a', "named alpha");
+
+        let previews = reg.iter_preview();
+        assert!(previews.iter().any(|(c, s)| *c == '"' && s.contains("hello")));
+        assert!(previews.iter().any(|(c, s)| *c == '0' && s.contains("yanked text")));
+        assert!(previews.iter().any(|(c, s)| *c == 'a' && s == "named alpha"));
+        assert!(previews.iter().any(|(c, s)| *c == '_' && s.contains("black hole")));
     }
 }
