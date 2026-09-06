@@ -179,11 +179,20 @@ pub fn word_move(buffer: &gtk::TextBuffer, range: Range, target: WordMotionTarge
 pub fn move_horizontally(buffer: &impl IsA<TextBuffer>, dir: i32, extend: bool) {
     let buffer = buffer.as_ref();
     let mut iter = buffer.iter_at_mark(&buffer.get_insert());
-    let moved = if dir < 0 {
-        iter.backward_cursor_position()
-    } else {
-        iter.forward_cursor_position()
-    };
+    let steps = dir.abs();
+    let mut moved = false;
+    for _ in 0..steps {
+        let step = if dir < 0 {
+            iter.backward_cursor_position()
+        } else {
+            iter.forward_cursor_position()
+        };
+        if step {
+            moved = true;
+        } else {
+            break;
+        }
+    }
     if moved {
         set_cursor(buffer, &iter, extend);
     } else if !extend {
@@ -198,16 +207,20 @@ pub fn move_vertically(buffer: &impl IsA<TextBuffer>, dir: i32, extend: bool) {
     let line_offset = cur.line_offset();
 
     let target_line = if dir < 0 {
-        if line == 0 {
-            return;
+        let steps = -dir;
+        if line < steps {
+            0
+        } else {
+            line - steps
         }
-        line - 1
     } else {
+        let steps = dir;
         let lc = buffer.line_count();
-        if line + 1 >= lc {
-            return;
+        if line + steps >= lc {
+            (lc - 1).max(0)
+        } else {
+            line + steps
         }
-        line + 1
     };
 
     let mut target = buffer.iter_at_line(target_line).expect("line exists");

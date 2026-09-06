@@ -1,6 +1,7 @@
 use std::num::NonZeroUsize;
 
 use crate::components::editor::controller::KeyHandleResult;
+use crate::components::statusline::DiagnosticSeverity;
 use crate::components::which_key::WhichKeyData;
 use crate::editor::register::Registers;
 use crate::keymap::{default_keymap, KeyEvent, KeyTrieRoot, Mode};
@@ -17,6 +18,7 @@ pub struct EditorState {
     pub count: Option<NonZeroUsize>,
     pub on_next_key: Option<OnKeyCallback>,
     pub which_key: Option<WhichKeyData>,
+    pub status_msg: Option<(String, DiagnosticSeverity)>,
 }
 
 impl EditorState {
@@ -30,6 +32,7 @@ impl EditorState {
             count: None,
             on_next_key: None,
             which_key: None,
+            status_msg: None,
         }
     }
 
@@ -53,6 +56,18 @@ impl EditorState {
         F: FnOnce(&mut EditorState, &gtk::TextBuffer, KeyEvent) -> KeyHandleResult + 'static,
     {
         self.on_next_key = Some(Box::new(f));
+    }
+
+    pub fn set_status(&mut self, msg: impl Into<String>) {
+        self.status_msg = Some((msg.into(), DiagnosticSeverity::Info));
+    }
+
+    pub fn set_error(&mut self, msg: impl Into<String>) {
+        self.status_msg = Some((msg.into(), DiagnosticSeverity::Error));
+    }
+
+    pub fn set_warning(&mut self, msg: impl Into<String>) {
+        self.status_msg = Some((msg.into(), DiagnosticSeverity::Warning));
     }
 }
 

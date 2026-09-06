@@ -9,6 +9,7 @@ use sourceview5::prelude::{BufferExt, ViewExt};
 
 use crate::components::editor::state::EditorState;
 use crate::components::editor::{apply_theme, handle_key, KeyHandleResult, CATPPUCCIN_MOCHA};
+use crate::components::statusline::{StatusLineConfig, StatusLineView, VcsInfo};
 use crate::components::which_key::{WhichKeyData, WhichKeyView};
 use crate::keymap::trie::gdk_key_to_event;
 use crate::keymap::Mode;
@@ -33,18 +34,12 @@ pub struct AppWidgets {
     source_view: sourceview5::View,
     #[allow(dead_code)]
     buffer: sourceview5::Buffer,
+    #[allow(dead_code)]
     title: adw::WindowTitle,
     which_key_view: WhichKeyView,
+    status_line: StatusLineView,
     #[allow(dead_code)]
     editor_state: Rc<RefCell<EditorState>>,
-}
-
-fn mode_title(mode: Mode) -> &'static str {
-    match mode {
-        Mode::Normal => "NORMAL",
-        Mode::Insert => "INSERT",
-        Mode::Select => "SELECT",
-    }
 }
 
 impl SimpleComponent for App {
@@ -55,11 +50,13 @@ impl SimpleComponent for App {
     type Widgets = AppWidgets;
 
     fn init_root() -> Self::Root {
-        adw::ApplicationWindow::builder()
+        let window = adw::ApplicationWindow::builder()
             .title("Strand")
             .default_width(900)
             .default_height(600)
-            .build()
+            .build();
+        window.add_css_class("strand-main-window");
+        window
     }
 
     fn init(
@@ -151,9 +148,21 @@ fn main() {
         overlay.set_child(Some(&scrolled));
         overlay.add_overlay(which_key_view.widget());
 
+        // ----- Status Bar Component (Phase 5 Helix UI Alignment) -----
+        let status_line = StatusLineView::new(StatusLineConfig::default());
+        status_line.connect_buffer(&buffer, &source_view);
+        status_line.set_file_info(Some(std::path::Path::new("src/main.rs")), false, false);
+        status_line.set_breadcrumbs("src > main.rs > fn main()");
+        status_line.set_vcs(&VcsInfo {
+            branch: Some("main".to_string()),
+            added: 0,
+            modified: 0,
+            deleted: 0,
+        });
+
         // ----- AdwHeaderBar -----
         let header = adw::HeaderBar::new();
-        let title = adw::WindowTitle::new("Strand", mode_title(Mode::Normal));
+        let title = adw::WindowTitle::new("Strand", "src/main.rs");
         header.set_title_widget(Some(&title));
 
         // ----- Root layout: vertical Box -----
@@ -162,6 +171,7 @@ fn main() {
             .build();
         vbox.append(&header);
         vbox.append(&overlay);
+        vbox.append(status_line.widget());
 
         // AdwApplicationWindow is single-child via set_content().
         window.set_content(Some(&vbox));
@@ -179,9 +189,9 @@ fn main() {
         key_controller.set_propagation_phase(gtk::PropagationPhase::Capture);
         let state_for_key = editor_state.clone();
         let buffer_for_key = buffer.clone();
-        let title_for_key = title.clone();
         let source_view_for_key = source_view.clone();
         let which_key_view_for_key = which_key_view.clone();
+        let status_line_for_key = status_line.clone();
         let sender_for_key = sender.clone();
         key_controller.connect_key_pressed(move |_, keyval, _keycode, state| {
             let mode = state_for_key.borrow().mode;
@@ -210,14 +220,27 @@ fn main() {
                 }
             }
 
+            // Sync Status messages (echo area)
+            let status_msg = state_for_key.borrow_mut().status_msg.take();
+            if let Some((msg, sev)) = status_msg {
+                status_line_for_key.echo(&msg, sev);
+            }
+
+            // Sync pending chord / numerical count / register indicator
+            let (count, pending_chord, selected_reg) = {
+                let s = state_for_key.borrow();
+                (s.count, s.keymap.pending_prefix_string(), s.selected_register)
+            };
+            status_line_for_key.set_pending(count, &pending_chord, selected_reg);
+
             match result {
                 KeyHandleResult::Propagate => glib::Propagation::Proceed,
                 KeyHandleResult::Stop => glib::Propagation::Stop,
                 KeyHandleResult::ModeChanged(new_mode) => {
                     // Update cursor: block in Normal, I-beam in Insert/Select
                     source_view_for_key.set_overwrite(new_mode == Mode::Normal);
-                    // Update header subtitle imperatively for immediate feedback
-                    title_for_key.set_subtitle(mode_title(new_mode));
+                    // Update status bar mode pill immediately (150ms smooth transition)
+                    status_line_for_key.set_mode(new_mode);
                     // Also via Relm4 for structural state sync
                     sender_for_key.input(AppMsg::ModeChanged(new_mode));
                     glib::Propagation::Stop
@@ -233,6 +256,7 @@ fn main() {
             buffer,
             title,
             which_key_view,
+            status_line,
             editor_state,
         };
 
@@ -257,7 +281,7 @@ fn main() {
 
     fn update_view(&self, widgets: &mut Self::Widgets, _sender: ComponentSender<Self>) {
         widgets.source_view.set_overwrite(self.mode == Mode::Normal);
-        widgets.title.set_subtitle(mode_title(self.mode));
+        widgets.status_line.set_mode(self.mode);
         if let Some(ref data) = self.which_key {
             widgets.which_key_view.show(data);
         } else {

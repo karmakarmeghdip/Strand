@@ -78,6 +78,7 @@ pub fn yank_selection(cx: &mut Context) -> KeyHandleResult {
         if reg == '"' {
             cx.state.registers.write('0', &txt);
         }
+        cx.set_status("1 selection yanked");
     }
     if cx.state.mode == Mode::Select {
         cx.state.set_mode(Mode::Normal);
@@ -94,6 +95,7 @@ pub fn paste_after(cx: &mut Context) -> KeyHandleResult {
         for _ in 0..cx.count() {
             motions::paste_after(cx.buffer, &text);
         }
+        cx.set_status("Pasted");
     }
     KeyHandleResult::Stop
 }
@@ -104,6 +106,7 @@ pub fn paste_before(cx: &mut Context) -> KeyHandleResult {
         for _ in 0..cx.count() {
             motions::paste_after(cx.buffer, &text);
         }
+        cx.set_status("Pasted");
     }
     KeyHandleResult::Stop
 }
@@ -112,6 +115,7 @@ pub fn yank_to_clipboard(cx: &mut Context) -> KeyHandleResult {
     let txt = motions::yank_selection(cx.buffer);
     if !txt.is_empty() {
         cx.state.registers.write('+', &txt);
+        cx.set_status("Yanked to clipboard (+)");
     }
     if cx.state.mode == Mode::Select {
         cx.state.set_mode(Mode::Normal);
@@ -128,6 +132,7 @@ pub fn paste_clipboard_after(cx: &mut Context) -> KeyHandleResult {
         for _ in 0..cx.count() {
             motions::paste_after(cx.buffer, &text);
         }
+        cx.set_status("Pasted from clipboard (+)");
     }
     KeyHandleResult::Stop
 }
@@ -138,6 +143,7 @@ pub fn paste_clipboard_before(cx: &mut Context) -> KeyHandleResult {
         for _ in 0..cx.count() {
             motions::paste_after(cx.buffer, &text);
         }
+        cx.set_status("Pasted from clipboard (+)");
     }
     KeyHandleResult::Stop
 }
@@ -146,6 +152,7 @@ pub fn undo(cx: &mut Context) -> KeyHandleResult {
     for _ in 0..cx.count() {
         motions::undo(cx.buffer);
     }
+    cx.set_status("Undo");
     if cx.state.mode == Mode::Select {
         cx.state.set_mode(Mode::Normal);
         return KeyHandleResult::ModeChanged(Mode::Normal);
@@ -157,6 +164,7 @@ pub fn redo(cx: &mut Context) -> KeyHandleResult {
     for _ in 0..cx.count() {
         motions::redo(cx.buffer);
     }
+    cx.set_status("Redo");
     if cx.state.mode == Mode::Select {
         cx.state.set_mode(Mode::Normal);
         return KeyHandleResult::ModeChanged(Mode::Normal);

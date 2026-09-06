@@ -6,12 +6,16 @@ use super::WhichKeyData;
 
 const WHICH_KEY_CSS: &str = r#"
 .which-key-card {
+    background-color: #181825;
+    color: #cdd6f4;
+    border: 1px solid #313244;
     padding: 10px 16px 14px 16px;
     border-radius: 12px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
 }
 
 .which-key-title {
+    color: #cdd6f4;
     font-weight: 700;
     font-size: 0.85em;
     letter-spacing: 0.06em;
@@ -23,11 +27,10 @@ const WHICH_KEY_CSS: &str = r#"
     font-size: 0.85em;
     border-radius: 5px;
     padding: 2px 6px;
-    background: alpha(@theme_fg_color, 0.08);
-    border: 1px solid alpha(@theme_fg_color, 0.16);
-    color: @theme_fg_color;
+    background: #313244;
+    border: 1px solid #45475a;
+    color: #89b4fa;
     min-width: 18px;
-    text-align: center;
 }
 
 .which-key-entry {
@@ -36,7 +39,7 @@ const WHICH_KEY_CSS: &str = r#"
 }
 
 .which-key-entry:hover {
-    background: alpha(@theme_fg_color, 0.06);
+    background: #313244;
 }
 "#;
 
@@ -185,6 +188,7 @@ impl WhichKeyView {
             key_badge.add_css_class("which-key-keycap");
             key_badge.set_halign(gtk::Align::Start);
             key_badge.set_valign(gtk::Align::Center);
+            key_badge.set_xalign(0.5);
 
             let desc_label = gtk::Label::new(Some(&entry.description));
             desc_label.set_halign(gtk::Align::Start);

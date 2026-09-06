@@ -335,6 +335,17 @@ impl KeyTrieRoot {
         self.pending.clear();
     }
 
+    pub fn pending_prefix_string(&self) -> String {
+        if !self.pending.is_empty() {
+            let keys: Vec<String> = self.pending.iter().map(|k| k.to_string()).collect();
+            format!("{}-", keys.join(""))
+        } else if let Some(ref sticky) = self.sticky {
+            format!("{}-", sticky.name.to_lowercase())
+        } else {
+            String::new()
+        }
+    }
+
     pub fn contains_key(&self, mode: Mode, key: KeyEvent) -> bool {
         if let Some(ref sticky_node) = self.sticky {
             if sticky_node.map.contains_key(&key) {

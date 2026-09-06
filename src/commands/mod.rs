@@ -51,6 +51,21 @@ impl<'a> Context<'a> {
     {
         self.state.on_next_key(f);
     }
+
+    #[inline]
+    pub fn set_status(&mut self, msg: impl Into<String>) {
+        self.state.set_status(msg);
+    }
+
+    #[inline]
+    pub fn set_error(&mut self, msg: impl Into<String>) {
+        self.state.set_error(msg);
+    }
+
+    #[inline]
+    pub fn set_warning(&mut self, msg: impl Into<String>) {
+        self.state.set_warning(msg);
+    }
 }
 
 /// Central command dispatch function mapping `EditorAction` to its command handler.
