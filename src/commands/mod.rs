@@ -1,4 +1,6 @@
+pub mod buffer;
 pub mod edit;
+pub mod file;
 pub mod motion;
 
 use crate::components::editor::controller::KeyHandleResult;
@@ -139,6 +141,17 @@ pub fn dispatch(action: EditorAction, cx: &mut Context) -> KeyHandleResult {
         EditorAction::SurroundReplace => edit::surround_replace(cx),
         EditorAction::SelectTextObjectAround => edit::select_textobject_around(cx),
         EditorAction::SelectTextObjectInner => edit::select_textobject_inner(cx),
+
+        // Buffers & Files
+        EditorAction::GotoNextBuffer => buffer::goto_next_buffer(cx),
+        EditorAction::GotoPreviousBuffer => buffer::goto_previous_buffer(cx),
+        EditorAction::BufferClose => buffer::buffer_close(cx),
+        EditorAction::FileSave => file::file_save(cx),
+        EditorAction::FileSaveAs => file::file_save_as(cx, std::path::Path::new("")),
+        EditorAction::FileOpen => file::file_open(cx, std::path::Path::new("")),
+        EditorAction::OpenFilePicker => file::open_file_picker(cx),
+        EditorAction::OpenBufferPicker => file::open_buffer_picker(cx),
+        EditorAction::CommandPalette => KeyHandleResult::OpenCommandPalette,
 
         EditorAction::Noop => KeyHandleResult::Stop,
     }

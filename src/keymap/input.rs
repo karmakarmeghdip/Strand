@@ -215,6 +215,25 @@ impl FromStr for KeyEvent {
     }
 }
 
+impl serde::Serialize for KeyEvent {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for KeyEvent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
 /// Canonicalize key event according to Helix rules:
 /// Character keys have SHIFT modifier stripped because the character itself already reflects
 /// whether shift was pressed (e.g. '"', 'A', ':', '+'). If a lowercase char has SHIFT,

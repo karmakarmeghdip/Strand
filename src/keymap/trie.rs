@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
 use super::actions::{EditorAction, Mode};
 // Re-exports for backwards compatibility
 #[allow(unused_imports)]
@@ -24,6 +26,85 @@ pub struct KeyTrieNode {
     pub name: String,
     pub map: HashMap<KeyEvent, KeyTrie>,
     pub is_sticky: bool,
+}
+
+impl Serialize for KeyTrieNode {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.map.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for KeyTrieNode {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let map = HashMap::<KeyEvent, KeyTrie>::deserialize(deserializer)?;
+        Ok(Self {
+            name: String::new(),
+            map,
+            is_sticky: false,
+        })
+    }
+}
+
+impl Serialize for KeyTrie {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            KeyTrie::Leaf(action) => action.serialize(serializer),
+            KeyTrie::Node(node) => node.serialize(serializer),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for KeyTrie {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct KeyTrieVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for KeyTrieVisitor {
+            type Value = KeyTrie;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                write!(formatter, "a command name or a sub-keymap table")
+            }
+
+            fn visit_str<E>(self, command: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                command
+                    .parse::<EditorAction>()
+                    .map(KeyTrie::Leaf)
+                    .map_err(E::custom)
+            }
+
+            fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
+            where
+                M: serde::de::MapAccess<'de>,
+            {
+                let mut mapping = HashMap::new();
+                while let Some((key, value)) = map.next_entry::<KeyEvent, KeyTrie>()? {
+                    mapping.insert(key, value);
+                }
+                Ok(KeyTrie::Node(KeyTrieNode {
+                    name: String::new(),
+                    map: mapping,
+                    is_sticky: false,
+                }))
+            }
+        }
+
+        deserializer.deserialize_any(KeyTrieVisitor)
+    }
 }
 
 impl KeyTrieNode {
@@ -547,6 +628,42 @@ mod tests {
         assert_eq!(
             root.get(Mode::Normal, KeyEvent::char('e')),
             KeymapResult::Matched(EditorAction::GotoFileEnd)
+        );
+    }
+
+    #[test]
+    fn toml_deserialization_of_keymap() {
+        let toml_str = r#"
+            [normal]
+            "C-s" = "select_all"
+            "w" = "move_left"
+            "g" = { "x" = "move_word_forward" }
+
+            [select]
+            "C-s" = "select_all"
+        "#;
+
+        let parsed: HashMap<Mode, KeyTrie> = toml::from_str(toml_str).unwrap();
+        assert!(parsed.contains_key(&Mode::Normal));
+        assert!(parsed.contains_key(&Mode::Select));
+
+        let mut keymap = default_keymap();
+        merge_keys(&mut keymap, parsed);
+        let mut root = KeyTrieRoot::new(keymap);
+
+        assert_eq!(
+            root.get(Mode::Normal, KeyEvent::from_str("C-s").unwrap()),
+            KeymapResult::Matched(EditorAction::SelectAll)
+        );
+        assert_eq!(
+            root.get(Mode::Normal, KeyEvent::char('w')),
+            KeymapResult::Matched(EditorAction::MoveLeft)
+        );
+
+        let _ = root.get(Mode::Normal, KeyEvent::char('g'));
+        assert_eq!(
+            root.get(Mode::Normal, KeyEvent::char('x')),
+            KeymapResult::Matched(EditorAction::MoveWordForward)
         );
     }
 }

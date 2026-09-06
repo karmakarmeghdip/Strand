@@ -1,0 +1,125 @@
+# Strand Configuration Example
+# Place in ~/.config/strand/config.toml or .strand/config.toml (workspace)
+# Strand also falls back to ~/.config/helix/config.toml or .helix/config.toml if present.
+
+# Active color theme.
+# Embedded Catppuccin flavors available: "catppuccin-mocha", "catppuccin-macchiato", "catppuccin-frappe", "catppuccin-latte"
+theme = "catppuccin-mocha"
+
+[editor]
+# Line numbers: "absolute" or "relative"
+line-number = "absolute"
+# Vertical padding around cursor when scrolling
+scrolloff = 5
+# Lines to scroll at once
+scroll-lines = 3
+# Mouse click & drag support
+mouse = true
+# Highlight the line the cursor is currently on
+cursorline = true
+# Highlight the column the cursor is currently on
+cursorcolumn = false
+# Column rulers to display
+rulers = [80, 120]
+# Automatic bracket/quote pairing (true or table)
+auto-pairs = true
+# Auto completion popup triggers
+auto-completion = true
+# Format file on save
+auto-format = true
+# Auto save on idle / focus loss
+auto-save = false
+# Milliseconds of idle before UI timeouts / diagnostics trigger
+idle-timeout = 250
+# Line ending for newly created documents: "native", "lf", or "crlf"
+default-line-ending = "native"
+# Ensure newline at EOF on write
+insert-final-newline = true
+# Atomic file writes
+atomic-save = true
+
+[editor.cursor-shape]
+# Cursor shape per mode: "block", "bar", or "underline"
+normal = "block"
+insert = "bar"
+select = "underline"
+
+[editor.file-picker]
+hidden = true
+follow-symlinks = true
+ignore = true
+git-ignore = true
+
+[editor.whitespace]
+# Render whitespace: "none", "all", or "selected"
+render = "none"
+characters = { space = "·", nbsp = "⍽", nnbsp = "␣", tab = "→", newline = "⏎" }
+
+[editor.indent-guides]
+render = false
+character = "│"
+skip-levels = 0
+
+[editor.soft-wrap]
+enable = false
+max-wrap = 20
+max-indent-retain = 40
+wrap-indicator = "↪ "
+
+[editor.lsp]
+display-messages = false
+auto-signature-help = true
+display-inlay-hints = false
+display-color-swatches = true
+snippets = true
+
+[editor.statusline]
+left = ["mode", "spinner", "file-name", "read-only-indicator", "file-modification-indicator"]
+center = []
+right = ["diagnostics", "selections", "position", "file-encoding", "file-line-ending", "file-type"]
+separator = "│"
+
+# ---------------------------------------------------------------------------
+# GUI Configuration (Strand GTK4 / Libadwaita specific)
+# ---------------------------------------------------------------------------
+[gui]
+# Font family used in editor buffer
+font-family = "Monospace"
+# Font size in points
+font-size = 11.0
+# Additional vertical line spacing in pixels
+line-spacing = 1
+# Initial window dimensions
+window-width = 1024
+window-height = 768
+# Whether window opens maximized
+maximized = false
+# Kinetic / smooth scrolling on touchpads and high refresh rate displays
+smooth-scrolling = true
+# Window color scheme preference: "dark", "light", or "system"
+theme-variant = "dark"
+# UI component visibility toggles
+show-tab-bar = true
+show-status-line = true
+show-line-numbers = true
+highlight-current-line = true
+
+# ---------------------------------------------------------------------------
+# Keybindings & Remappings
+# ---------------------------------------------------------------------------
+[keys.normal]
+# Helix command names or Strand actions are both supported
+"C-s" = "select_all"
+"U" = "redo"
+"Y" = "yank_to_clipboard"
+"P" = "paste_clipboard_after"
+
+# Custom sub-keymaps
+[keys.normal.g]
+"a" = "select_all"
+
+[keys.select]
+"C-s" = "select_all"
+
+[keys.insert]
+"C-s" = "exit_to_normal"

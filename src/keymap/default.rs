@@ -40,12 +40,18 @@ pub fn build_match_node() -> KeyTrieNode {
 /// - `y` -> yank to system clipboard
 /// - `p` -> paste system clipboard after
 /// - `P` -> paste system clipboard before
+/// - `f` -> open file picker
+/// - `b` -> open buffer picker
+/// - `w` -> save file
 pub fn build_space_node() -> KeyTrieNode {
     let mut space_node = KeyTrieNode::new("Space");
     let leaf = KeyTrie::Leaf;
     space_node.insert(KeyEvent::char('y'), leaf(EditorAction::YankToClipboard));
     space_node.insert(KeyEvent::char('p'), leaf(EditorAction::PasteClipboardAfter));
     space_node.insert(KeyEvent::char('P'), leaf(EditorAction::PasteClipboardBefore));
+    space_node.insert(KeyEvent::char('f'), leaf(EditorAction::OpenFilePicker));
+    space_node.insert(KeyEvent::char('b'), leaf(EditorAction::OpenBufferPicker));
+    space_node.insert(KeyEvent::char('w'), leaf(EditorAction::FileSave));
     space_node
 }
 
@@ -55,6 +61,8 @@ pub fn build_space_node() -> KeyTrieNode {
 /// - `h` -> goto line start
 /// - `l` -> goto line end
 /// - `s` -> goto first non-whitespace
+/// - `n` -> goto next buffer
+/// - `p` -> goto previous buffer
 pub fn build_goto_node() -> KeyTrieNode {
     let mut goto_node = KeyTrieNode::new("Goto");
     let leaf = KeyTrie::Leaf;
@@ -63,6 +71,8 @@ pub fn build_goto_node() -> KeyTrieNode {
     goto_node.insert(KeyEvent::char('h'), leaf(EditorAction::GotoLineStart));
     goto_node.insert(KeyEvent::char('l'), leaf(EditorAction::GotoLineEnd));
     goto_node.insert(KeyEvent::char('s'), leaf(EditorAction::GotoFirstNonWhitespace));
+    goto_node.insert(KeyEvent::char('n'), leaf(EditorAction::GotoNextBuffer));
+    goto_node.insert(KeyEvent::char('p'), leaf(EditorAction::GotoPreviousBuffer));
     goto_node
 }
 
@@ -114,6 +124,7 @@ pub fn default_keymap() -> HashMap<Mode, KeyTrie> {
         leaf(EditorAction::FlipSelection),
     );
     normal.insert(KeyEvent::char('~'), leaf(EditorAction::ToggleCase));
+    normal.insert(KeyEvent::char(':'), leaf(EditorAction::CommandPalette));
 
     // g prefix
     normal.insert(KeyEvent::char('g'), KeyTrie::Node(build_goto_node()));
@@ -255,6 +266,14 @@ mod tests {
             goto.map.get(&KeyEvent::char('s')),
             Some(&KeyTrie::Leaf(EditorAction::GotoFirstNonWhitespace))
         );
+        assert_eq!(
+            goto.map.get(&KeyEvent::char('n')),
+            Some(&KeyTrie::Leaf(EditorAction::GotoNextBuffer))
+        );
+        assert_eq!(
+            goto.map.get(&KeyEvent::char('p')),
+            Some(&KeyTrie::Leaf(EditorAction::GotoPreviousBuffer))
+        );
     }
 
     #[test]
@@ -272,6 +291,18 @@ mod tests {
         assert_eq!(
             space.map.get(&KeyEvent::char('P')),
             Some(&KeyTrie::Leaf(EditorAction::PasteClipboardBefore))
+        );
+        assert_eq!(
+            space.map.get(&KeyEvent::char('f')),
+            Some(&KeyTrie::Leaf(EditorAction::OpenFilePicker))
+        );
+        assert_eq!(
+            space.map.get(&KeyEvent::char('b')),
+            Some(&KeyTrie::Leaf(EditorAction::OpenBufferPicker))
+        );
+        assert_eq!(
+            space.map.get(&KeyEvent::char('w')),
+            Some(&KeyTrie::Leaf(EditorAction::FileSave))
         );
     }
 

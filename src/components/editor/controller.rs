@@ -15,6 +15,14 @@ pub enum KeyHandleResult {
     Propagate,
     /// Mode changed — caller must update UI via Relm4.
     ModeChanged(Mode),
+    /// Active document changed — caller must update active buffer in view.
+    DocumentChanged(crate::editor::DocumentId),
+    /// Open file picker requested.
+    OpenFilePicker,
+    /// Open buffer picker requested.
+    OpenBufferPicker,
+    /// Open command palette requested (:).
+    OpenCommandPalette,
 }
 
 /// Imperative handler for a single GDK key event in CAPTURE phase.
@@ -1079,5 +1087,57 @@ mod tests {
         assert_eq!(res_tilde, KeyHandleResult::Stop);
         let char_after_tilde = buf.text(&buf.iter_at_offset(2), &buf.iter_at_offset(3), false);
         assert_eq!(char_after_tilde.as_str(), "h");
+    }
+
+    #[gtk::test]
+    fn test_controller_goto_next_and_previous_buffer() {
+        use std::path::PathBuf;
+        use crate::config::Config;
+        use crate::editor::workspace::Workspace;
+
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mut state = EditorState::with_config_and_workspace(
+            Config::default(),
+            Workspace::new(root.clone()),
+        );
+        let id1 = state.open(&root.join("Cargo.toml")).unwrap();
+        let id2 = state.open(&root.join("src/main.rs")).unwrap();
+        assert_eq!(state.current_document_id, id2);
+
+        let buf = state.current_buffer();
+        // Press 'g'
+        let res_g = handle_key(&mut state, &buf, KeyEvent::char('g'));
+        assert_eq!(res_g, KeyHandleResult::Stop);
+
+        // Press 'n' -> goto_next_buffer -> DocumentChanged(id1)
+        let res_n = handle_key(&mut state, &buf, KeyEvent::char('n'));
+        assert_eq!(res_n, KeyHandleResult::DocumentChanged(id1));
+        assert_eq!(state.current_document_id, id1);
+
+        // Press 'g' then 'p' -> goto_previous_buffer -> DocumentChanged(id2)
+        handle_key(&mut state, &buf, KeyEvent::char('g'));
+        let res_p = handle_key(&mut state, &buf, KeyEvent::char('p'));
+        assert_eq!(res_p, KeyHandleResult::DocumentChanged(id2));
+        assert_eq!(state.current_document_id, id2);
+    }
+
+    #[gtk::test]
+    fn test_controller_space_pickers_and_command_palette() {
+        let mut state = EditorState::new();
+        let buf = state.current_buffer();
+
+        // <Space>f -> OpenFilePicker
+        handle_key(&mut state, &buf, KeyEvent::char(' '));
+        let res_f = handle_key(&mut state, &buf, KeyEvent::char('f'));
+        assert_eq!(res_f, KeyHandleResult::OpenFilePicker);
+
+        // <Space>b -> OpenBufferPicker
+        handle_key(&mut state, &buf, KeyEvent::char(' '));
+        let res_b = handle_key(&mut state, &buf, KeyEvent::char('b'));
+        assert_eq!(res_b, KeyHandleResult::OpenBufferPicker);
+
+        // ':' -> CommandPalette
+        let res_colon = handle_key(&mut state, &buf, KeyEvent::char(':'));
+        assert_eq!(res_colon, KeyHandleResult::OpenCommandPalette);
     }
 }

@@ -47,7 +47,7 @@ src/lsp/                                helix-lsp/
 
 ---
 
-## Completed Milestones (Phases 1–5)
+## Completed Milestones (Phases 1–7)
 
 | Phase | Description | Key Deliverables | Status |
 |---|---|---|---|
@@ -56,6 +56,9 @@ src/lsp/                                helix-lsp/
 | **Phase 3** | Keymap Decoupling & Numerical Counts | Removed `CatchAll`; implemented pure trie + `on_next_key`; numerical count accumulation (`5j`, `3w`) | Completed |
 | **Phase 4** | State, Registers & Command Dispatch | Introduced `Context<'a>` & `dispatch()`; added `Registers` (`"`, `0`, `_`, `+`, `*`) with GDK clipboard sync | Completed |
 | **Phase 5** | UI Alignment: Statusline & Which-Key | Libadwaita statusline with mode pills, cursor coords, pending keys, notifications; floating Which-Key overlay | Completed |
+| **Phase 6** | Core Editing & Motion Parity | Linewise/selection paste semantics (`p`/`P`), Helix `Goto` suite (`gg`/`ge`/`gh`/`gl`/`gs`), editing primitives (`o`/`O`, `r`, `%`, `;`, `Alt-;`, `~`) | Completed |
+| **Phase 7** | Keymap Decomposition & Helix Config System | Decomposed `src/keymap/` into `input.rs`, `default.rs`, `trie.rs`, `actions.rs`; full Helix `config.toml` port + GUI options in `src/config/` | Completed |
+| **Phase 8 Prep & 9.1** | Project, Workspace & Multi-Document State | Helix workspace detection, Git VCS extraction, .gitignore file walker, `Document` (`sourceview5::Buffer`), multi-doc buffer switching, CLI project/file opening (`strand [PATH]`) | Completed |
 
 ---
 
@@ -127,68 +130,90 @@ src/lsp/                                helix-lsp/
     - Provide an API to merge custom keybinding overrides into `KeyTrieRoot`.
   - **Verification**: Unit tests demonstrating overriding a default keybinding (e.g. mapping `C-s` to a command).
 
+- [x] **7.3 Helix Configuration System Port & GUI Settings (`src/config/`)**
+  - **Priority**: P1 (Feature & Architecture)
+  - **Files**: `src/config/mod.rs`, `src/config/editor.rs`, `src/config/gui.rs`, `data/config.example.toml`, `src/app.rs`, `src/editor/state.rs`
+  - **Details**:
+    - Port Helix configuration loading system from `helix-loader` and `helix-term/src/config.rs`.
+    - Model complete `[editor]` configuration schema (scrolloff, scroll-lines, mouse, line-number, cursorline, gutters, auto-pairs, auto-completion, auto-format, auto-save, idle-timeout, statusline, cursor-shape, file-picker, whitespace, bufferline, indent-guides, soft-wrap, rulers, default-line-ending, etc.).
+    - Model `[gui]` configuration schema (font-family, font-size, line-spacing, window dimensions, maximized, smooth-scrolling, theme-variant, show-tab-bar, show-status-line, show-line-numbers, highlight-current-line).
+    - Implement recursive `merge_toml_values` and layered configuration resolution (`$XDG_CONFIG_HOME/strand/config.toml`, fallback to `helix`, and workspace `.strand/config.toml`, fallback to `.helix`).
+    - Wire active configuration directly to `EditorState`, `KeyTrieRoot`, GTK window sizing/maximization, CSS font provider, theme application, and view properties.
+  - **Verification**: 117 unit tests pass; `config.example.toml` parsed and validated in automated test suite; `cargo clippy -- -D warnings` clean.
+
 ---
 
 ### Phase 8: Command Palette & Fuzzy Picker (`Space f` / `Space b` / `:`)
 *Goal: Implement Phase 4 picker capabilities from AGENTS.md using Libadwaita dialogs and fuzzy search.*
 
-- [ ] **8.1 Integrate Fuzzy Matcher Engine**
+- [x] **8.1 Integrate Fuzzy Matcher Engine**
   - **Priority**: P2 (Feature)
   - **Dependencies**: None
-  - **Files**: `Cargo.toml`, `src/core/fuzzy.rs` or `src/components/command_palette/matcher.rs`
+  - **Files**: `Cargo.toml`, `src/core/fuzzy.rs`, `src/core/mod.rs`
   - **Details**:
-    - Add `fuzzy-matcher` or `nucleo` dependency.
-    - Create a search scoring interface for item filtering and match range highlighting.
-  - **Verification**: Unit tests benchmarking sub-millisecond filtering over 10,000 strings.
+    - Pinned and integrated `nucleo = "0.5"` (matching Helix's fuzzy engine).
+    - Implemented `FuzzyMatcher` with multi-atom pattern scoring, match range extraction, and path-aware matching mode (`set_match_paths`).
+    - Implemented `highlight_pango_markup` and `highlight_pango_markup_with_tags` for styling matched characters with Catppuccin accent color and escaping XML/Pango entities.
+  - **Verification**: Unit tests benchmarking sub-millisecond filtering over 10,000 strings passing in ~0.01s.
 
-- [ ] **8.2 Command Palette Dialog Component (`src/components/command_palette/`)**
+- [x] **8.2 Command Palette Dialog Component (`src/components/command_palette/`)**
   - **Priority**: P2 (UI Component)
   - **Dependencies**: 8.1
   - **Files**: `src/components/command_palette/mod.rs`, `src/components/command_palette/view.rs`
   - **Details**:
-    - Create modal picker using `adw::Dialog` (or `gtk::Window` overlay), with `GtkSearchEntry` and `GtkListView`.
-    - Support keyboard navigation (`Up`/`Down`, `C-n`/`C-p`, `Enter` to select, `Esc` to dismiss).
-  - **Verification**: Interactive verification of palette opening, filtering, keyboard navigation, and closing.
+    - Created modal picker `CommandPaletteDialog` using `adw::Window` with `gtk::SearchEntry`, counter indicator, `gtk::ScrolledWindow`, and single-selection `gtk::ListBox`.
+    - Styled with custom Catppuccin CSS (`.strand-palette-window`, `.strand-palette-search`, `.strand-palette-row`, etc.).
+    - Implemented full keyboard navigation (`Up`/`Down`, `Ctrl-n`/`Ctrl-p`, `PageUp`/`PageDown`, `Enter` to activate, `Esc` to dismiss) via `gtk::EventControllerKey` at capture phase.
+  - **Verification**: Unit tests `test_dialog_creation_and_filtering` verifying initialization, live filtering, and closing.
 
-- [ ] **8.3 File Picker (`Space f`)**
+- [x] **8.3 File Picker (`Space f`)**
   - **Priority**: P2 (Feature)
   - **Dependencies**: 8.2
-  - **Files**: `src/components/command_palette/files.rs`
+  - **Files**: `src/components/command_palette/files.rs`, `src/app.rs`
   - **Details**:
-    - Walk workspace directory, respecting `.gitignore` and hidden files.
-    - Wire `<Space>f` in keymap to open file picker; opening a file loads it into `GtkSourceBuffer`.
-  - **Verification**: Open existing file in repository via `Space f`.
+    - Integrated with `Workspace::walk_files` respecting `.gitignore` and `FilePickerConfig`.
+    - Wired `<Space>f` in keymap and controller fast path to dispatch `KeyHandleResult::OpenFilePicker` -> `AppMsg::OpenFilePicker`.
+    - Connected selection callback to `AppMsg::OpenFile(path)` which loads document into `GtkSourceBuffer` (Invariant #1), updates title, breadcrumbs, statusline, and theme.
+  - **Verification**: `test_show_file_picker_dialog` and `test_file_palette_items_construction` passing.
 
-- [ ] **8.4 Buffer Picker (`Space b`)**
+- [x] **8.4 Buffer Picker (`Space b`)**
   - **Priority**: P2 (Feature)
   - **Dependencies**: 8.2
-  - **Files**: `src/components/command_palette/buffers.rs`
+  - **Files**: `src/components/command_palette/buffers.rs`, `src/app.rs`
   - **Details**:
-    - List open documents with file name, relative path, and modified status indicator.
-    - Switch active buffer on selection.
-  - **Verification**: Open multiple buffers and toggle between them using `Space b`.
+    - Lists open documents with buffer ID, display name, relative path, and modified `[+]` / read-only `[ro]` status badges.
+    - Wired `<Space>b` in keymap and controller to dispatch `KeyHandleResult::OpenBufferPicker` -> `AppMsg::OpenBufferPicker`.
+    - Switching active buffer via selection dispatches `AppMsg::DocumentChanged(doc_id)` and updates active view.
+  - **Verification**: `test_show_buffer_picker_dialog` and `test_buffer_picker_item_display` passing.
 
-- [ ] **8.5 Command Line Prompt (`:`)**
+- [x] **8.5 Command Line Prompt (`:`)**
   - **Priority**: P2 (Feature)
   - **Dependencies**: 8.2
-  - **Files**: `src/commands/mod.rs`, `src/components/command_palette/commands.rs`
+  - **Files**: `src/commands/file.rs`, `src/components/command_palette/commands.rs`, `src/app.rs`
   - **Details**:
-    - Implement Helix-style command mode triggered by `:`.
-    - Built-in commands: `:w` (save file), `:q` (quit), `:e <path>` (open file), `:theme <name>` (switch Catppuccin theme flavor).
-  - **Verification**: Type `:w` to write document; `:theme catppuccin-latte` to switch theme live.
+    - Implemented Helix-style ex-command palette triggered by `:` in Normal mode (`KeyHandleResult::OpenCommandPalette` -> `AppMsg::OpenCommandPalette`).
+    - Catalog of built-in commands with descriptions: `:w` (save), `:w <path>`, `:q` (quit), `:q!` (force close), `:wq` / `:x`, `:e <path>` (open file), `:b <id|name>` (switch buffer), `:bn` / `:bp` (buffer cycling), `:pwd`, `:cd <path>`, `:theme <name>` (switches Catppuccin flavor: mocha, macchiato, frappe, latte).
+    - Supports executing custom command strings typed directly into the prompt (e.g. `:theme catppuccin-latte`, `:w copy.rs`).
+  - **Verification**: `test_show_command_palette_dialog`, `test_builtin_commands_catalog`, and `test_execute_commands` passing.
 
 ---
 
 ### Phase 9: Multi-Document Workspace & Docking (`libpanel`) (AGENTS.md Phase 4)
 *Goal: Replace single-view host with a multi-document layout using `libpanel`.*
 
-- [ ] **9.1 Multi-Document State Architecture (`src/editor/document.rs`, `src/editor/state.rs`)**
+- [x] **9.1 Multi-Document State & Project Architecture (`src/editor/document.rs`, `src/editor/workspace.rs`, `src/editor/state.rs`)**
   - **Priority**: P2 (Architecture)
-  - **Files**: `src/editor/document.rs`, `src/editor/mod.rs`
+  - **Files**: `src/editor/document.rs`, `src/editor/workspace.rs`, `src/editor/state.rs`, `src/editor/mod.rs`, `src/commands/buffer.rs`, `src/commands/file.rs`, `src/app.rs`, `src/main.rs`
   - **Details**:
-    - Define `Document` holding `sourceview5::Buffer`, file path, modification status, undo tracking, and syntax language.
-    - Update `EditorState` to manage multiple documents, tracking active document ID and document collection.
-  - **Verification**: Unit tests adding, retrieving, closing, and switching documents.
+    - Ported Helix project workspace detection (`find_workspace_in` ancestor walk for `.git`, `.svn`, `.jj`, `.strand`, `.helix`).
+    - Implemented Git VCS branch extraction from `.git/HEAD` and worktrees.
+    - Implemented project file walker using `ignore::WalkBuilder` respecting `.gitignore` and `FilePickerConfig`.
+    - Defined `Document` wrapping `sourceview5::Buffer` (single source of truth) with file loading, atomic saving, reload, automatic syntax language detection via `LanguageManager`, line ending detection, and indent style detection.
+    - Updated `EditorState` to manage collection of `Document`s indexed by `DocumentId`, tracking `current_document_id`, with `open`, `close_document`, `switch_document`, `next_document`, `prev_document`.
+    - Integrated buffer switching on the GTK4 fast-path in `App`, updating active buffer, window title, breadcrumbs, and statusline.
+    - Added CLI argument support `strand [PATH]` to open projects or files directly.
+    - Added commands and keybindings: `gn` (`goto_next_buffer`), `gp` (`goto_previous_buffer`), `<Space>w` (`file_save`), `<Space>f` (`file_picker`), `<Space>b` (`buffer_picker`), `:` (`execute_command`).
+  - **Verification**: 131 unit tests pass; `cargo clippy -- -D warnings` clean.
 
 - [ ] **9.2 Libpanel Dock & Frame Integration (`src/components/workspace/`)**
   - **Priority**: P2 (UI Architecture)
