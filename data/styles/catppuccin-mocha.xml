@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Catppuccin Mocha style scheme for GtkSourceView 5 / Strand
+  Derived from Helix editor theme (reference/helix/runtime/themes/catppuccin_mocha.toml)
+-->
+<style-scheme id="catppuccin-mocha" _name="Catppuccin Mocha" version="1.0">
+  <author>Catppuccin Org / Strand</author>
+  <_description>Soothing pastel theme for the high-spirited (Mocha)</_description>
+
+  <metadata>
+    <property name="variant">dark</property>
+    <property name="light-variant">catppuccin-latte</property>
+  </metadata>
+
+  <!-- Named Colors -->
+  <color name="rosewater" value="#f5e0dc"/>
+  <color name="flamingo"  value="#f2cdcd"/>
+  <color name="pink"      value="#f5c2e7"/>
+  <color name="mauve"     value="#cba6f7"/>
+  <color name="red"       value="#f38ba8"/>
+  <color name="maroon"    value="#eba0ac"/>
+  <color name="peach"     value="#fab387"/>
+  <color name="yellow"    value="#f9e2af"/>
+  <color name="green"     value="#a6e3a1"/>
+  <color name="teal"      value="#94e2d5"/>
+  <color name="sky"       value="#89dceb"/>
+  <color name="sapphire"  value="#74c7ec"/>
+  <color name="blue"      value="#89b4fa"/>
+  <color name="lavender"  value="#b4befe"/>
+
+  <color name="text"      value="#cdd6f4"/>
+  <color name="subtext1"  value="#bac2de"/>
+  <color name="subtext0"  value="#a6adc8"/>
+  <color name="overlay2"  value="#9399b2"/>
+  <color name="overlay1"  value="#7f849c"/>
+  <color name="overlay0"  value="#6c7086"/>
+  <color name="surface2"  value="#585b70"/>
+  <color name="surface1"  value="#45475a"/>
+  <color name="surface0"  value="#313244"/>
+  <color name="base"      value="#1e1e2e"/>
+  <color name="mantle"    value="#181825"/>
+  <color name="crust"     value="#11111b"/>
+
+  <color name="cursorline"       value="#2a2b3c"/>
+  <color name="secondary_cursor" value="#b5a6a8"/>
+
+  <!-- Global Styles -->
+  <style name="text"                  foreground="text" background="base"/>
+  <style name="selection"             background="surface1"/>
+  <style name="selection-unfocused"   background="surface0"/>
+  <style name="cursor"                foreground="rosewater"/>
+  <style name="secondary-cursor"      foreground="secondary_cursor"/>
+  <style name="current-line"          background="cursorline"/>
+  <style name="line-numbers"          foreground="surface1" background="base"/>
+  <style name="current-line-number"   foreground="lavender" background="cursorline"/>
+  <style name="draw-spaces"           foreground="overlay0"/>
+  <style name="background-pattern"    background="mantle"/>
+  <style name="bracket-match"         foreground="peach" background="surface1" bold="true"/>
+  <style name="bracket-mismatch"      foreground="red" background="surface1" bold="true"/>
+  <style name="right-margin"          foreground="surface0" background="surface0"/>
+  <style name="search-match"          foreground="text" background="surface2"/>
+
+  <!-- Default Syntax Highlighting -->
+  <style name="def:comment"              foreground="overlay2" italic="true"/>
+  <style name="def:shebang"              foreground="overlay2" bold="true"/>
+  <style name="def:doc-comment-element"  foreground="subtext1" italic="true"/>
+  <style name="def:constant"             foreground="peach"/>
+  <style name="def:special-char"         foreground="pink"/>
+  <style name="def:string"               foreground="green"/>
+  <style name="def:character"            foreground="teal"/>
+  <style name="def:number"               foreground="peach"/>
+  <style name="def:floating-point"       foreground="peach"/>
+  <style name="def:decimal"              foreground="peach"/>
+  <style name="def:base-n-integer"       foreground="peach"/>
+  <style name="def:boolean"              foreground="peach"/>
+  <style name="def:identifier"           foreground="text"/>
+  <style name="def:function"             foreground="blue"/>
+  <style name="def:builtin"              foreground="red"/>
+  <style name="def:keyword"              foreground="mauve"/>
+  <style name="def:statement"            foreground="mauve" italic="true"/>
+  <style name="def:operator"             foreground="sky"/>
+  <style name="def:type"                 foreground="yellow"/>
+  <style name="def:preprocessor"         foreground="yellow"/>
+  <style name="def:error"                foreground="red" underline="error"/>
+  <style name="def:warning"              foreground="yellow" underline="error"/>
+  <style name="def:note"                 foreground="sky" bold="true"/>
+  <style name="def:heading"              foreground="red" bold="true"/>
+  <style name="def:list-marker"          foreground="teal" bold="true"/>
+  <style name="def:link-text"            foreground="lavender"/>
+  <style name="def:link-destination"     foreground="blue" italic="true" underline="single"/>
+  <style name="def:emphasis"             italic="true"/>
+  <style name="def:strong-emphasis"      bold="true"/>
+  <style name="def:inline-code"          foreground="green"/>
+  <style name="def:insertion"            underline="single"/>
+  <style name="def:deletion"             strikethrough="true"/>
+  <style name="def:underlined"           underline="single"/>
+
+  <!-- Rust Overrides -->
+  <style name="rust:attribute"           foreground="yellow"/>
+  <style name="rust:lifetime"            foreground="sapphire"/>
+  <style name="rust:macro"               foreground="rosewater"/>
+  <style name="rust:scope"               foreground="yellow" italic="true"/>
+  <style name="rust:identifier"          foreground="red"/>
+  <style name="rust:keyword"             foreground="mauve"/>
+
+  <!-- Diff Overrides -->
+  <style name="diff:added-line"          foreground="green"/>
+  <style name="diff:removed-line"        foreground="red"/>
+  <style name="diff:changed-line"        foreground="blue"/>
+  <style name="diff:diff-file"           foreground="yellow"/>
+  <style name="diff:location"            foreground="sapphire"/>
+
+  <!-- XML / HTML / CSS / JSON -->
+  <style name="xml:element-name"         foreground="blue"/>
+  <style name="xml:attribute-name"       foreground="yellow"/>
+  <style name="xml:attribute-value"      foreground="green"/>
+  <style name="xml:namespace"            foreground="yellow" italic="true"/>
+  <style name="json:keyname"             foreground="blue"/>
+  <style name="css:property-name"        foreground="blue"/>
+  <style name="css:type-selector"        foreground="yellow"/>
+  <style name="css:id-selector"          foreground="blue" bold="true"/>
+  <style name="css:class-selector"       foreground="yellow"/>
+</style-scheme>

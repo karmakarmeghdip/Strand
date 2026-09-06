@@ -197,6 +197,42 @@ where
             }
             KeyHandleResult::Stop
         }
+        EditorAction::MatchBrackets => {
+            motions::match_brackets(buffer, state.last_matched_bracket, extend);
+            KeyHandleResult::Stop
+        }
+        EditorAction::SurroundAdd(ch) => {
+            motions::surround_add(buffer, ch);
+            if state.mode == Mode::Select {
+                state.set_mode(Mode::Normal);
+                return KeyHandleResult::ModeChanged(Mode::Normal);
+            }
+            KeyHandleResult::Stop
+        }
+        EditorAction::SurroundDelete(ch) => {
+            motions::surround_delete(buffer, ch);
+            if state.mode == Mode::Select {
+                state.set_mode(Mode::Normal);
+                return KeyHandleResult::ModeChanged(Mode::Normal);
+            }
+            KeyHandleResult::Stop
+        }
+        EditorAction::SurroundReplace(from, to) => {
+            motions::surround_replace(buffer, from, to);
+            if state.mode == Mode::Select {
+                state.set_mode(Mode::Normal);
+                return KeyHandleResult::ModeChanged(Mode::Normal);
+            }
+            KeyHandleResult::Stop
+        }
+        EditorAction::SelectTextObjectAround(obj) => {
+            motions::select_textobject(buffer, obj, false);
+            KeyHandleResult::Stop
+        }
+        EditorAction::SelectTextObjectInner(obj) => {
+            motions::select_textobject(buffer, obj, true);
+            KeyHandleResult::Stop
+        }
         EditorAction::Noop => KeyHandleResult::Stop,
     }
 }
@@ -301,7 +337,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn word_motions_via_trie() {
         if !ensure_gtk() { return; }
         let mut state = EditorState::new();
@@ -353,7 +388,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn x_selects_line() {
         if !ensure_gtk() { return; }
         let mut state = EditorState::new();
@@ -365,7 +399,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn x_extends_to_next_line_on_repeat() {
         if !ensure_gtk() { return; }
         let mut state = EditorState::new();
@@ -383,7 +416,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn v_then_l_extends_and_keeps_anchor() {
         if !ensure_gtk() { return; }
         let mut state = EditorState::new();
@@ -409,7 +441,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn w_in_normal_creates_selection_and_wc_deletes_word() {
         if !ensure_gtk() { return; }
         let mut state = EditorState::new();
@@ -429,7 +460,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn w_in_select_extends_selection() {
         if !ensure_gtk() { return; }
         let mut state = EditorState::new();
@@ -448,7 +478,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn w_across_newline_does_not_select_newline() {
         if !ensure_gtk() { return; }
         let mut state = EditorState::new();
@@ -474,7 +503,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn k_from_fn_main_goes_up_not_left() {
         if !ensure_gtk() { return; }
         let text = "// Strand — Phase 1: AdwApplicationWindow + GtkSourceView\n// Verify: syntax highlighting, line numbers, kinetic scroll\n\nfn main() {\n    println!(\"Hello, Strand!\");";
@@ -585,5 +613,91 @@ mod tests {
             buf.text(&buf.start_iter(), &buf.end_iter(), false),
             "initial text"
         );
+    }
+
+    #[test]
+    fn match_mode_mm_jump() {
+        if !ensure_gtk() {
+            return;
+        }
+        let mut state = EditorState::new();
+        let buf = buf_with("fn foo() { let x = 1; }");
+        buf.place_cursor(&buf.iter_at_offset(9)); // on '{'
+        handle_key(&mut state, &buf, KeyEvent::char('m'));
+        let res = handle_key(&mut state, &buf, KeyEvent::char('m'));
+        assert_eq!(res, KeyHandleResult::Stop);
+        assert_eq!(buf.iter_at_mark(&buf.get_insert()).offset(), 23); // on '}'
+    }
+
+    #[test]
+    fn match_mode_surround_add_in_select() {
+        if !ensure_gtk() {
+            return;
+        }
+        let mut state = EditorState::new();
+        let buf = buf_with("hello world");
+        state.set_mode(Mode::Select);
+        buf.select_range(&buf.iter_at_offset(0), &buf.iter_at_offset(5)); // select "hello"
+
+        handle_key(&mut state, &buf, KeyEvent::char('m'));
+        handle_key(&mut state, &buf, KeyEvent::char('s'));
+        let res = handle_key(&mut state, &buf, KeyEvent::char('('));
+        assert_eq!(res, KeyHandleResult::ModeChanged(Mode::Normal));
+        assert_eq!(state.mode, Mode::Normal);
+        let full = buf.text(&buf.start_iter(), &buf.end_iter(), false).to_string();
+        assert_eq!(full, "(hello) world");
+    }
+
+    #[test]
+    fn match_mode_surround_delete_and_replace() {
+        if !ensure_gtk() {
+            return;
+        }
+        let mut state = EditorState::new();
+        let buf = buf_with("let a = (foo);");
+        buf.place_cursor(&buf.iter_at_offset(10)); // inside "(foo)"
+
+        // Replace '(' with '['
+        handle_key(&mut state, &buf, KeyEvent::char('m'));
+        handle_key(&mut state, &buf, KeyEvent::char('r'));
+        handle_key(&mut state, &buf, KeyEvent::char('('));
+        let res = handle_key(&mut state, &buf, KeyEvent::char('['));
+        assert_eq!(res, KeyHandleResult::Stop);
+        let text1 = buf.text(&buf.start_iter(), &buf.end_iter(), false).to_string();
+        assert_eq!(text1, "let a = [foo];");
+
+        // Delete '['
+        handle_key(&mut state, &buf, KeyEvent::char('m'));
+        handle_key(&mut state, &buf, KeyEvent::char('d'));
+        let res2 = handle_key(&mut state, &buf, KeyEvent::char('['));
+        assert_eq!(res2, KeyHandleResult::Stop);
+        let text2 = buf.text(&buf.start_iter(), &buf.end_iter(), false).to_string();
+        assert_eq!(text2, "let a = foo;");
+    }
+
+    #[test]
+    fn match_mode_textobjects_inner_and_around() {
+        if !ensure_gtk() {
+            return;
+        }
+        let mut state = EditorState::new();
+        let buf = buf_with("fn bar() { hello_world }");
+        buf.place_cursor(&buf.iter_at_offset(15)); // inside '{ ... }'
+
+        // mi{ selects inside '{' and '}'
+        handle_key(&mut state, &buf, KeyEvent::char('m'));
+        handle_key(&mut state, &buf, KeyEvent::char('i'));
+        let res = handle_key(&mut state, &buf, KeyEvent::char('{'));
+        assert_eq!(res, KeyHandleResult::Stop);
+        let (s, e) = buf.selection_bounds().unwrap();
+        assert_eq!(buf.text(&s, &e, false).as_str(), " hello_world ");
+
+        // ma{ selects around '{' and '}'
+        handle_key(&mut state, &buf, KeyEvent::char('m'));
+        handle_key(&mut state, &buf, KeyEvent::char('a'));
+        let res2 = handle_key(&mut state, &buf, KeyEvent::char('{'));
+        assert_eq!(res2, KeyHandleResult::Stop);
+        let (s2, e2) = buf.selection_bounds().unwrap();
+        assert_eq!(buf.text(&s2, &e2, false).as_str(), "{ hello_world }");
     }
 }

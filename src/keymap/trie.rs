@@ -177,6 +177,16 @@ impl std::str::FromStr for KeyEvent {
 // Trie
 // ---------------------------------------------------------------------------
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CatchAll {
+    SurroundAdd,
+    SurroundDelete,
+    SurroundReplaceFirst,
+    SurroundReplaceSecond(char),
+    TextObjectAround,
+    TextObjectInner,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KeyTrie {
     Leaf(EditorAction),
@@ -188,6 +198,7 @@ pub struct KeyTrieNode {
     pub name: String,
     pub map: HashMap<KeyEvent, KeyTrie>,
     pub is_sticky: bool,
+    pub catch_all: Option<CatchAll>,
 }
 
 impl KeyTrieNode {
@@ -196,6 +207,7 @@ impl KeyTrieNode {
             name: name.to_string(),
             map: HashMap::new(),
             is_sticky: false,
+            catch_all: None,
         }
     }
 
@@ -212,11 +224,41 @@ impl KeyTrie {
         }
     }
 
-    pub fn search(&self, keys: &[KeyEvent]) -> Option<&KeyTrie> {
-        let mut cur = self;
+    pub fn search(&self, keys: &[KeyEvent]) -> Option<KeyTrie> {
+        let mut cur = self.clone();
         for k in keys {
             cur = match cur {
-                KeyTrie::Node(node) => node.map.get(k)?,
+                KeyTrie::Node(node) => {
+                    if let Some(child) = node.map.get(k) {
+                        child.clone()
+                    } else if let Some(catch_all) = node.catch_all {
+                        match (catch_all, k.code) {
+                            (CatchAll::SurroundAdd, KeyCode::Char(c)) => {
+                                KeyTrie::Leaf(EditorAction::SurroundAdd(c))
+                            }
+                            (CatchAll::SurroundDelete, KeyCode::Char(c)) => {
+                                KeyTrie::Leaf(EditorAction::SurroundDelete(c))
+                            }
+                            (CatchAll::SurroundReplaceFirst, KeyCode::Char(c)) => {
+                                let mut next_node = KeyTrieNode::new(&format!("Replace {c} with"));
+                                next_node.catch_all = Some(CatchAll::SurroundReplaceSecond(c));
+                                KeyTrie::Node(next_node)
+                            }
+                            (CatchAll::SurroundReplaceSecond(from), KeyCode::Char(to)) => {
+                                KeyTrie::Leaf(EditorAction::SurroundReplace(from, to))
+                            }
+                            (CatchAll::TextObjectAround, KeyCode::Char(c)) => {
+                                KeyTrie::Leaf(EditorAction::SelectTextObjectAround(c))
+                            }
+                            (CatchAll::TextObjectInner, KeyCode::Char(c)) => {
+                                KeyTrie::Leaf(EditorAction::SelectTextObjectInner(c))
+                            }
+                            _ => return None,
+                        }
+                    } else {
+                        return None;
+                    }
+                }
                 KeyTrie::Leaf(_) => return None,
             };
         }
@@ -288,25 +330,25 @@ impl KeyTrieRoot {
                         self.pending.clear();
                         self.sticky = Some(n.clone());
                     }
-                    KeymapResult::Pending(n.clone())
+                    KeymapResult::Pending(n)
                 }
                 Some(KeyTrie::Leaf(act)) => {
                     self.pending.clear();
-                    KeymapResult::Matched(act.clone())
+                    KeymapResult::Matched(act)
                 }
                 None => KeymapResult::Cancelled(self.pending.drain(..).collect()),
             }
         } else {
             // No pending — try single key.
             match search_root.search(&[key]) {
-                Some(KeyTrie::Leaf(act)) => KeymapResult::Matched(act.clone()),
+                Some(KeyTrie::Leaf(act)) => KeymapResult::Matched(act),
                 Some(KeyTrie::Node(n)) => {
                     if n.is_sticky {
                         self.sticky = Some(n.clone());
-                        KeymapResult::Pending(n.clone())
+                        KeymapResult::Pending(n)
                     } else {
                         self.pending.push(key);
-                        KeymapResult::Pending(n.clone())
+                        KeymapResult::Pending(n)
                     }
                 }
                 None => KeymapResult::NotFound,
@@ -319,11 +361,83 @@ impl KeyTrieRoot {
     }
 }
 
+/// Build the Helix-style Match (`m`) submap:
+/// - `mm` -> goto matching bracket
+/// - `ms<char>` -> surround selection
+/// - `mr<from><to>` -> replace surround pair
+/// - `md<char>` -> delete surround pair ('m' for closest)
+/// - `ma<object>` -> select around textobject ('w', 'W', 'p', 'm', brackets, quotes)
+/// - `mi<object>` -> select inside textobject ('w', 'W', 'p', 'm', brackets, quotes)
+pub fn build_match_node() -> KeyTrieNode {
+    let mut match_node = KeyTrieNode::new("Match");
+    let leaf = |a| KeyTrie::Leaf(a);
+
+    // mm -> match_brackets
+    match_node.insert(KeyEvent::char('m'), leaf(EditorAction::MatchBrackets));
+
+    // ms -> surround_add
+    let mut surround_add_node = KeyTrieNode::new("Surround add");
+    surround_add_node.catch_all = Some(CatchAll::SurroundAdd);
+    for ch in ['(', ')', '[', ']', '{', '}', '<', '>', '"', '\'', '`'] {
+        surround_add_node.insert(KeyEvent::char(ch), leaf(EditorAction::SurroundAdd(ch)));
+    }
+    match_node.insert(KeyEvent::char('s'), KeyTrie::Node(surround_add_node));
+
+    // md -> surround_delete
+    let mut surround_del_node = KeyTrieNode::new("Surround delete");
+    surround_del_node.catch_all = Some(CatchAll::SurroundDelete);
+    surround_del_node.insert(KeyEvent::char('m'), leaf(EditorAction::SurroundDelete('m')));
+    for ch in ['(', ')', '[', ']', '{', '}', '<', '>', '"', '\'', '`'] {
+        surround_del_node.insert(KeyEvent::char(ch), leaf(EditorAction::SurroundDelete(ch)));
+    }
+    match_node.insert(KeyEvent::char('d'), KeyTrie::Node(surround_del_node));
+
+    // mr -> surround_replace
+    let mut surround_rep_node = KeyTrieNode::new("Surround replace");
+    surround_rep_node.catch_all = Some(CatchAll::SurroundReplaceFirst);
+    for from in ['m', '(', ')', '[', ']', '{', '}', '<', '>', '"', '\'', '`'] {
+        let mut rep_target = KeyTrieNode::new(&format!("Replace {from} with"));
+        rep_target.catch_all = Some(CatchAll::SurroundReplaceSecond(from));
+        for to in ['(', ')', '[', ']', '{', '}', '<', '>', '"', '\'', '`'] {
+            rep_target.insert(KeyEvent::char(to), leaf(EditorAction::SurroundReplace(from, to)));
+        }
+        surround_rep_node.insert(KeyEvent::char(from), KeyTrie::Node(rep_target));
+    }
+    match_node.insert(KeyEvent::char('r'), KeyTrie::Node(surround_rep_node));
+
+    // ma -> select_textobject_around
+    let mut around_node = KeyTrieNode::new("Match around");
+    around_node.catch_all = Some(CatchAll::TextObjectAround);
+    around_node.insert(KeyEvent::char('w'), leaf(EditorAction::SelectTextObjectAround('w')));
+    around_node.insert(KeyEvent::char('W'), leaf(EditorAction::SelectTextObjectAround('W')));
+    around_node.insert(KeyEvent::char('p'), leaf(EditorAction::SelectTextObjectAround('p')));
+    around_node.insert(KeyEvent::char('m'), leaf(EditorAction::SelectTextObjectAround('m')));
+    for ch in ['(', ')', '[', ']', '{', '}', '<', '>', '"', '\'', '`'] {
+        around_node.insert(KeyEvent::char(ch), leaf(EditorAction::SelectTextObjectAround(ch)));
+    }
+    match_node.insert(KeyEvent::char('a'), KeyTrie::Node(around_node));
+
+    // mi -> select_textobject_inner
+    let mut inner_node = KeyTrieNode::new("Match inside");
+    inner_node.catch_all = Some(CatchAll::TextObjectInner);
+    inner_node.insert(KeyEvent::char('w'), leaf(EditorAction::SelectTextObjectInner('w')));
+    inner_node.insert(KeyEvent::char('W'), leaf(EditorAction::SelectTextObjectInner('W')));
+    inner_node.insert(KeyEvent::char('p'), leaf(EditorAction::SelectTextObjectInner('p')));
+    inner_node.insert(KeyEvent::char('m'), leaf(EditorAction::SelectTextObjectInner('m')));
+    for ch in ['(', ')', '[', ']', '{', '}', '<', '>', '"', '\'', '`'] {
+        inner_node.insert(KeyEvent::char(ch), leaf(EditorAction::SelectTextObjectInner(ch)));
+    }
+    match_node.insert(KeyEvent::char('i'), KeyTrie::Node(inner_node));
+
+    match_node
+}
+
 /// Build the default Phase-2 keymap.
 ///
 /// Normal:
 ///   h/j/k/l, w/b/e, x, i, d/c/y/p, v, Esc
 ///   g -> goto node (g g = file start, g e = file end for demo; extensible)
+///   m -> match node (mm = match brackets, ms = surround add, mr = replace, md = delete, ma/mi = textobjects)
 ///   Space -> space node (placeholder for which-key phase 3)
 /// Insert:
 ///   Esc -> normal
@@ -363,6 +477,9 @@ pub fn default_keymap() -> HashMap<Mode, KeyTrie> {
     goto_node.insert(KeyEvent::char('g'), leaf(EditorAction::MoveLeft)); // placeholder: gg
     goto_node.insert(KeyEvent::char('e'), leaf(EditorAction::MoveWordEnd)); // ge
     normal.insert(KeyEvent::char('g'), KeyTrie::Node(goto_node));
+
+    // m prefix (Helix match mode)
+    normal.insert(KeyEvent::char('m'), KeyTrie::Node(build_match_node()));
 
     // Space prefix (which-key placeholder)
     let mut space_node = KeyTrieNode::new("Space");
@@ -434,6 +551,8 @@ pub fn default_keymap() -> HashMap<Mode, KeyTrie> {
         KeyEvent::new(KeyCode::Down, KeyModifiers::empty()),
         leaf(EditorAction::MoveDown),
     );
+    // m prefix also available in Select mode
+    select.insert(KeyEvent::char('m'), KeyTrie::Node(build_match_node()));
     m.insert(Mode::Select, KeyTrie::Node(select));
 
     m
@@ -579,11 +698,11 @@ mod tests {
         let root = map.get(&Mode::Normal).unwrap();
         assert_eq!(
             root.search(&[KeyEvent::char('h')]),
-            Some(&KeyTrie::Leaf(EditorAction::MoveLeft))
+            Some(KeyTrie::Leaf(EditorAction::MoveLeft))
         );
         assert_eq!(
             root.search(&[KeyEvent::char('x')]),
-            Some(&KeyTrie::Leaf(EditorAction::SelectLine))
+            Some(KeyTrie::Leaf(EditorAction::SelectLine))
         );
     }
 
@@ -678,15 +797,15 @@ mod tests {
         let root = map.get(&Mode::Select).unwrap();
         assert_eq!(
             root.search(&[KeyEvent::char('w')]),
-            Some(&KeyTrie::Leaf(EditorAction::MoveWordForward))
+            Some(KeyTrie::Leaf(EditorAction::MoveWordForward))
         );
         assert_eq!(
             root.search(&[KeyEvent::char('I')]),
-            Some(&KeyTrie::Leaf(EditorAction::InsertAtLineStart))
+            Some(KeyTrie::Leaf(EditorAction::InsertAtLineStart))
         );
         assert_eq!(
             root.search(&[KeyEvent::char('A')]),
-            Some(&KeyTrie::Leaf(EditorAction::InsertAtLineEnd))
+            Some(KeyTrie::Leaf(EditorAction::InsertAtLineEnd))
         );
     }
 
@@ -696,19 +815,19 @@ mod tests {
         let root = map.get(&Mode::Normal).unwrap();
         assert_eq!(
             root.search(&[KeyEvent::char('I')]),
-            Some(&KeyTrie::Leaf(EditorAction::InsertAtLineStart))
+            Some(KeyTrie::Leaf(EditorAction::InsertAtLineStart))
         );
         assert_eq!(
             root.search(&[KeyEvent::char('A')]),
-            Some(&KeyTrie::Leaf(EditorAction::InsertAtLineEnd))
+            Some(KeyTrie::Leaf(EditorAction::InsertAtLineEnd))
         );
         assert_eq!(
             root.search(&[KeyEvent::char('u')]),
-            Some(&KeyTrie::Leaf(EditorAction::Undo))
+            Some(KeyTrie::Leaf(EditorAction::Undo))
         );
         assert_eq!(
             root.search(&[KeyEvent::char('U')]),
-            Some(&KeyTrie::Leaf(EditorAction::Redo))
+            Some(KeyTrie::Leaf(EditorAction::Redo))
         );
 
         // Test GDK conversion with SHIFT mask
@@ -721,5 +840,72 @@ mod tests {
         assert_eq!(ev_u, KeyEvent::char('u'));
         let ev_cap_u = gdk_to_key_event('U' as u32, SHIFT_MASK).unwrap();
         assert_eq!(ev_cap_u, KeyEvent::char('U'));
+    }
+
+    #[test]
+    fn match_mode_keybinds() {
+        let map = default_keymap();
+        let mut trie = KeyTrieRoot::new(map);
+
+        // mm -> MatchBrackets
+        let res = trie.get(Mode::Normal, KeyEvent::char('m'));
+        assert!(matches!(res, KeymapResult::Pending(_)));
+        let res2 = trie.get(Mode::Normal, KeyEvent::char('m'));
+        assert_eq!(res2, KeymapResult::Matched(EditorAction::MatchBrackets));
+
+        // ms( -> SurroundAdd('(')
+        let _ = trie.get(Mode::Normal, KeyEvent::char('m'));
+        let _ = trie.get(Mode::Normal, KeyEvent::char('s'));
+        let res_ms = trie.get(Mode::Normal, KeyEvent::char('('));
+        assert_eq!(res_ms, KeymapResult::Matched(EditorAction::SurroundAdd('(')));
+
+        // ms* -> SurroundAdd('*') via catch_all
+        let _ = trie.get(Mode::Normal, KeyEvent::char('m'));
+        let _ = trie.get(Mode::Normal, KeyEvent::char('s'));
+        let res_ms_star = trie.get(Mode::Normal, KeyEvent::char('*'));
+        assert_eq!(res_ms_star, KeymapResult::Matched(EditorAction::SurroundAdd('*')));
+
+        // md( -> SurroundDelete('(')
+        let _ = trie.get(Mode::Normal, KeyEvent::char('m'));
+        let _ = trie.get(Mode::Normal, KeyEvent::char('d'));
+        let res_md = trie.get(Mode::Normal, KeyEvent::char('('));
+        assert_eq!(res_md, KeymapResult::Matched(EditorAction::SurroundDelete('(')));
+
+        // mdm -> SurroundDelete('m') (closest pair)
+        let _ = trie.get(Mode::Normal, KeyEvent::char('m'));
+        let _ = trie.get(Mode::Normal, KeyEvent::char('d'));
+        let res_mdm = trie.get(Mode::Normal, KeyEvent::char('m'));
+        assert_eq!(res_mdm, KeymapResult::Matched(EditorAction::SurroundDelete('m')));
+
+        // mr([ -> SurroundReplace('(', '[')
+        let _ = trie.get(Mode::Normal, KeyEvent::char('m'));
+        let _ = trie.get(Mode::Normal, KeyEvent::char('r'));
+        let _ = trie.get(Mode::Normal, KeyEvent::char('('));
+        let res_mr = trie.get(Mode::Normal, KeyEvent::char('['));
+        assert_eq!(res_mr, KeymapResult::Matched(EditorAction::SurroundReplace('(', '[')));
+
+        // mrm[ -> SurroundReplace('m', '[')
+        let _ = trie.get(Mode::Normal, KeyEvent::char('m'));
+        let _ = trie.get(Mode::Normal, KeyEvent::char('r'));
+        let _ = trie.get(Mode::Normal, KeyEvent::char('m'));
+        let res_mrm = trie.get(Mode::Normal, KeyEvent::char('['));
+        assert_eq!(res_mrm, KeymapResult::Matched(EditorAction::SurroundReplace('m', '[')));
+
+        // maw -> SelectTextObjectAround('w')
+        let _ = trie.get(Mode::Normal, KeyEvent::char('m'));
+        let _ = trie.get(Mode::Normal, KeyEvent::char('a'));
+        let res_maw = trie.get(Mode::Normal, KeyEvent::char('w'));
+        assert_eq!(res_maw, KeymapResult::Matched(EditorAction::SelectTextObjectAround('w')));
+
+        // mi( -> SelectTextObjectInner('(')
+        let _ = trie.get(Mode::Normal, KeyEvent::char('m'));
+        let _ = trie.get(Mode::Normal, KeyEvent::char('i'));
+        let res_mi = trie.get(Mode::Normal, KeyEvent::char('('));
+        assert_eq!(res_mi, KeymapResult::Matched(EditorAction::SelectTextObjectInner('(')));
+
+        // Works in Select mode too
+        let _ = trie.get(Mode::Select, KeyEvent::char('m'));
+        let res_sel_mm = trie.get(Mode::Select, KeyEvent::char('m'));
+        assert_eq!(res_sel_mm, KeymapResult::Matched(EditorAction::MatchBrackets));
     }
 }

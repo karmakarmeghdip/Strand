@@ -5,6 +5,7 @@ pub struct EditorState {
     pub mode: Mode,
     pub clipboard: String,
     pub keymap: KeyTrieRoot,
+    pub last_matched_bracket: Option<i32>,
 }
 
 impl EditorState {
@@ -13,6 +14,7 @@ impl EditorState {
             mode: Mode::Normal,
             clipboard: String::new(),
             keymap: KeyTrieRoot::new(default_keymap()),
+            last_matched_bracket: None,
         }
     }
 
@@ -24,6 +26,7 @@ impl EditorState {
         self.mode = mode;
         self.keymap.clear_pending();
         self.keymap.sticky = None;
+        self.last_matched_bracket = None;
     }
 }
 

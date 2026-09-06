@@ -51,6 +51,14 @@ pub enum EditorAction {
     Undo,            // u
     Redo,            // U
 
+    // Match actions (m prefix)
+    MatchBrackets,
+    SurroundAdd(char),
+    SurroundDelete(char),
+    SurroundReplace(char, char),
+    SelectTextObjectAround(char),
+    SelectTextObjectInner(char),
+
     // Structural / palette
     Noop,
 }
@@ -79,6 +87,12 @@ impl EditorAction {
             Self::PasteBefore => "paste before",
             Self::Undo => "undo change",
             Self::Redo => "redo change",
+            Self::MatchBrackets => "goto matching bracket",
+            Self::SurroundAdd(_) => "surround selection",
+            Self::SurroundDelete(_) => "delete surround pair",
+            Self::SurroundReplace(_, _) => "replace surround pair",
+            Self::SelectTextObjectAround(_) => "select around textobject",
+            Self::SelectTextObjectInner(_) => "select inside textobject",
             Self::Noop => "no operation",
         }
     }

@@ -8,7 +8,7 @@ use relm4::{ComponentParts, ComponentSender, SimpleComponent};
 use sourceview5::prelude::{BufferExt, ViewExt};
 
 use crate::components::editor::state::EditorState;
-use crate::components::editor::{handle_key, KeyHandleResult};
+use crate::components::editor::{apply_theme, handle_key, KeyHandleResult, CATPPUCCIN_MOCHA};
 use crate::keymap::trie::gdk_key_to_event;
 use crate::keymap::Mode;
 
@@ -32,6 +32,14 @@ pub struct AppWidgets {
     title: adw::WindowTitle,
     #[allow(dead_code)]
     editor_state: Rc<RefCell<EditorState>>,
+}
+
+fn mode_title(mode: Mode) -> &'static str {
+    match mode {
+        Mode::Normal => "NORMAL",
+        Mode::Insert => "INSERT",
+        Mode::Select => "SELECT",
+    }
 }
 
 impl SimpleComponent for App {
@@ -72,16 +80,17 @@ impl SimpleComponent for App {
         buffer.set_highlight_syntax(true);
         buffer.set_highlight_matching_brackets(true);
 
-        // Style scheme: follow Adwaita-dark; fallback to default if not found.
-        let scheme_manager = sourceview5::StyleSchemeManager::default();
-        // Prefer Adwaita-dark, fallback to adwaita, then classic.
-        let scheme = scheme_manager
-            .scheme("Adwaita-dark")
-            .or_else(|| scheme_manager.scheme("adwaita-dark"))
-            .or_else(|| scheme_manager.scheme("classic"));
-        if let Some(scheme) = scheme {
-            buffer.set_style_scheme(Some(&scheme));
-        }
+        let state_for_bracket = editor_state.clone();
+        buffer.connect_bracket_matched(move |_buf, iter, match_type| {
+            if let (sourceview5::BracketMatchType::Found, Some(iter)) = (match_type, iter) {
+                state_for_bracket.borrow_mut().last_matched_bracket = Some(iter.offset());
+            } else {
+                state_for_bracket.borrow_mut().last_matched_bracket = None;
+            }
+        });
+
+        // Style scheme: Catppuccin Mocha (from Helix theme)
+        apply_theme(&buffer, CATPPUCCIN_MOCHA);
 
         // Initial content – proves highlighting/line numbers/kinetic scroll.
         let initial_text = r#"// Strand — Phase 1: AdwApplicationWindow + GtkSourceView
@@ -129,7 +138,7 @@ fn main() {
 
         // ----- AdwHeaderBar -----
         let header = adw::HeaderBar::new();
-        let title = adw::WindowTitle::new("Strand", "NORMAL — h/j/k/l w/b/e x i/I a/A u/U d/c/y/p v | Esc");
+        let title = adw::WindowTitle::new("Strand", mode_title(Mode::Normal));
         header.set_title_widget(Some(&title));
 
         // ----- Root layout: vertical Box -----
@@ -142,6 +151,9 @@ fn main() {
         // AdwApplicationWindow is single-child via set_content().
         window.set_content(Some(&vbox));
 
+        // Normal mode starts with block cursor via native overwrite mode
+        source_view.set_overwrite(true);
+
         // Focus the source view after window is ready.
         // No show_all() in GTK4 — widgets visible by default.
 
@@ -153,6 +165,7 @@ fn main() {
         let state_for_key = editor_state.clone();
         let buffer_for_key = buffer.clone();
         let title_for_key = title.clone();
+        let source_view_for_key = source_view.clone();
         let sender_for_key = sender.clone();
         key_controller.connect_key_pressed(move |_, keyval, _keycode, state| {
             let mode = state_for_key.borrow().mode;
@@ -171,13 +184,10 @@ fn main() {
                 KeyHandleResult::Propagate => glib::Propagation::Proceed,
                 KeyHandleResult::Stop => glib::Propagation::Stop,
                 KeyHandleResult::ModeChanged(new_mode) => {
+                    // Update cursor: block in Normal, I-beam in Insert/Select
+                    source_view_for_key.set_overwrite(new_mode == Mode::Normal);
                     // Update header subtitle imperatively for immediate feedback
-                    let subtitle = match new_mode {
-                        Mode::Normal => "NORMAL — h/j/k/l w/b/e x i/I a/A u/U d/c/y/p v | Esc",
-                        Mode::Insert => "INSERT — Esc to normal",
-                        Mode::Select => "SELECT — h/j/k/l w/b/e x I/A d/y/c Esc",
-                    };
-                    title_for_key.set_subtitle(subtitle);
+                    title_for_key.set_subtitle(mode_title(new_mode));
                     // Also via Relm4 for structural state sync
                     sender_for_key.input(AppMsg::ModeChanged(new_mode));
                     glib::Propagation::Stop
@@ -209,11 +219,7 @@ fn main() {
     }
 
     fn update_view(&self, widgets: &mut Self::Widgets, _sender: ComponentSender<Self>) {
-        let subtitle = match self.mode {
-            Mode::Normal => "NORMAL — h/j/k/l w/b/e x i/I a/A u/U d/c/y/p v | Esc",
-            Mode::Insert => "INSERT — Esc to normal",
-            Mode::Select => "SELECT — h/j/k/l w/b/e x I/A d/y/c Esc",
-        };
-        widgets.title.set_subtitle(subtitle);
+        widgets.source_view.set_overwrite(self.mode == Mode::Normal);
+        widgets.title.set_subtitle(mode_title(self.mode));
     }
 }
