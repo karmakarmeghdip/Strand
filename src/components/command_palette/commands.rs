@@ -115,10 +115,13 @@ where
 
     CommandPaletteDialog::show(
         parent,
-        "Command Palette",
-        "Type command (:w, :q, :e <path>, :theme <name>)...",
-        PaletteMode::Command,
-        ":",
+        super::PaletteConfig {
+            title: "Command Palette",
+            placeholder: "Type command (:w, :q, :e <path>, :theme <name>)...",
+            mode: PaletteMode::Command,
+            initial_input: ":",
+            initial_cursor: 0,
+        },
         items,
         move |item, raw_input| {
             let cmd_to_run = if !raw_input.trim().is_empty() && raw_input.trim() != ":" {

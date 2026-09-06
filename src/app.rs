@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use adw::prelude::AdwApplicationWindowExt;
+use gtk::gio::prelude::ApplicationExt;
 use gtk::glib;
 use gtk::prelude::{BoxExt, Cast, EventControllerExt, TextViewExt, WidgetExt};
 use relm4::{ComponentParts, ComponentSender, SimpleComponent};
@@ -48,6 +49,7 @@ pub enum AppMsg {
     ExecuteCommand(String),
     ShowWhichKey(WhichKeyData),
     HideWhichKey,
+    Quit,
     #[allow(dead_code)]
     Noop,
 }
@@ -332,6 +334,10 @@ impl SimpleComponent for App {
                     sender_for_key.input(AppMsg::OpenCommandPalette);
                     glib::Propagation::Stop
                 }
+                KeyHandleResult::Quit => {
+                    sender_for_key.input(AppMsg::Quit);
+                    glib::Propagation::Stop
+                }
                 KeyHandleResult::ModeChanged(new_mode) => {
                     source_view_for_key.set_overwrite(new_mode == Mode::Normal);
                     status_line_for_key.set_mode(new_mode);
@@ -368,15 +374,20 @@ impl SimpleComponent for App {
                 let _ = self.editor_state.borrow_mut().open(&path);
             }
             AppMsg::ExecuteCommand(cmd) => {
-                let buf = self.editor_state.borrow().current_buffer();
-                let mut state = self.editor_state.borrow_mut();
-                let mut cx = crate::commands::Context::new(
-                    &mut state,
-                    buf.upcast_ref(),
-                    1,
-                    '"',
-                );
-                crate::commands::file::execute_command(&mut cx, &cmd);
+                let res = {
+                    let buf = self.editor_state.borrow().current_buffer();
+                    let mut state = self.editor_state.borrow_mut();
+                    let mut cx = crate::commands::Context::new(
+                        &mut state,
+                        buf.upcast_ref(),
+                        1,
+                        '"',
+                    );
+                    crate::commands::file::execute_command(&mut cx, &cmd)
+                };
+                if res == KeyHandleResult::Quit {
+                    relm4::main_application().quit();
+                }
             }
             AppMsg::ShowWhichKey(data) => {
                 self.which_key = Some(data);
@@ -393,12 +404,18 @@ impl SimpleComponent for App {
             AppMsg::OpenCommandPalette => {
                 *self.pending_palette.borrow_mut() = Some(PaletteOpenRequest::Command);
             }
+            AppMsg::Quit => {
+                relm4::main_application().quit();
+            }
             AppMsg::Noop => {}
         }
     }
 
     fn update_view(&self, widgets: &mut Self::Widgets, sender: ComponentSender<Self>) {
         let s = self.editor_state.borrow();
+        if s.documents.is_empty() {
+            return;
+        }
         let doc = s.current_document();
         let current_theme = s.config.theme.as_deref().unwrap_or(CATPPUCCIN_MOCHA);
         apply_theme(doc.buffer(), current_theme);
@@ -436,16 +453,19 @@ impl SimpleComponent for App {
                 }
                 PaletteOpenRequest::Buffer => {
                     let sender = sender.clone();
+                    let current_id = s.current_document_id;
                     let items: Vec<crate::components::command_palette::buffers::BufferPickerItem> = s
-                        .documents
-                        .iter()
-                        .map(|(&id, d)| {
+                        .documents_in_mru_order()
+                        .into_iter()
+                        .map(|d| {
                             crate::components::command_palette::buffers::BufferPickerItem {
-                                id,
+                                id: d.id(),
                                 display_name: d.display_name(),
                                 relative_path: d.relative_path().map(|p| p.to_string_lossy().to_string()),
                                 is_modified: d.is_modified(),
                                 is_read_only: d.is_read_only(),
+                                is_current: d.id() == current_id,
+                                focused_at: d.focused_at(),
                             }
                         })
                         .collect();

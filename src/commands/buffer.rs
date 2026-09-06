@@ -6,7 +6,7 @@ use crate::editor::state::CloseError;
 pub fn goto_next_buffer(cx: &mut Context) -> KeyHandleResult {
     let next_id = cx.state.next_document();
     let display = cx.state.current_document().display_name();
-    cx.set_status(format!("Switched to buffer {}: {}", next_id, display));
+    cx.set_status(format!("Switched to buffer: {}", display));
     KeyHandleResult::DocumentChanged(next_id)
 }
 
@@ -14,22 +14,23 @@ pub fn goto_next_buffer(cx: &mut Context) -> KeyHandleResult {
 pub fn goto_previous_buffer(cx: &mut Context) -> KeyHandleResult {
     let prev_id = cx.state.prev_document();
     let display = cx.state.current_document().display_name();
-    cx.set_status(format!("Switched to buffer {}: {}", prev_id, display));
+    cx.set_status(format!("Switched to buffer: {}", display));
     KeyHandleResult::DocumentChanged(prev_id)
 }
 
-/// Close active buffer (`:bclose`, `:bc`, `:q`). Fails if modified without force.
+/// Close active buffer (`:bclose`, `:bc`). Fails if modified without force.
+/// If closing the last remaining document, quits the application.
 pub fn buffer_close(cx: &mut Context) -> KeyHandleResult {
     let current_id = cx.state.current_document_id;
     match cx.state.close_document(current_id, false) {
-        Ok(()) => {
-            let new_id = cx.state.current_document_id;
+        Ok(Some(new_id)) => {
             let display = cx.state.current_document().display_name();
-            cx.set_status(format!("Closed buffer. Now at {}: {}", new_id, display));
+            cx.set_status(format!("Closed buffer. Now at: {}", display));
             KeyHandleResult::DocumentChanged(new_id)
         }
+        Ok(None) => KeyHandleResult::Quit,
         Err(CloseError::Modified) => {
-            cx.set_error("Buffer has unsaved changes (use :q! or force to close)");
+            cx.set_error("Buffer has unsaved changes (use :bc! to force close)");
             KeyHandleResult::Stop
         }
         Err(CloseError::DoesNotExist) => {
@@ -39,16 +40,17 @@ pub fn buffer_close(cx: &mut Context) -> KeyHandleResult {
     }
 }
 
-/// Force close active buffer ignoring unsaved changes (`:q!`, `:bc!`).
+/// Force close active buffer ignoring unsaved changes (`:bc!`).
+/// If closing the last remaining document, quits the application.
 pub fn buffer_force_close(cx: &mut Context) -> KeyHandleResult {
     let current_id = cx.state.current_document_id;
     match cx.state.close_document(current_id, true) {
-        Ok(()) => {
-            let new_id = cx.state.current_document_id;
+        Ok(Some(new_id)) => {
             let display = cx.state.current_document().display_name();
-            cx.set_status(format!("Closed buffer. Now at {}: {}", new_id, display));
+            cx.set_status(format!("Closed buffer. Now at: {}", display));
             KeyHandleResult::DocumentChanged(new_id)
         }
+        Ok(None) => KeyHandleResult::Quit,
         Err(e) => {
             cx.set_error(format!("Error closing buffer: {e}"));
             KeyHandleResult::Stop
@@ -109,5 +111,10 @@ mod tests {
         assert_eq!(res_fclose, KeyHandleResult::DocumentChanged(id1));
         assert!(!cx.state.documents.contains_key(&id2));
         assert_eq!(cx.state.current_document_id, id1);
+
+        // buffer_force_close on last document should return Quit
+        let res_last = buffer_force_close(&mut cx);
+        assert_eq!(res_last, KeyHandleResult::Quit);
+        assert!(cx.state.documents.is_empty());
     }
 }

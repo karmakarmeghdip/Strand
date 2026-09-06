@@ -3,12 +3,13 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::gdk;
+use gtk::gio;
 use gtk::glib;
 use gtk::pango;
 
 use crate::core::fuzzy::{escape_pango, highlight_pango_markup_with_tags, FuzzyMatcher};
 
-use super::{PaletteItem, PaletteMode};
+use super::{PaletteConfig, PaletteItem, PaletteMode};
 
 const PALETTE_CSS: &str = r#"
 .strand-palette-window {
@@ -48,15 +49,19 @@ const PALETTE_CSS: &str = r#"
     background-color: transparent;
 }
 
-.strand-palette-row {
+.strand-palette-list row {
     padding: 6px 12px;
     border-radius: 6px;
     margin: 2px 4px;
 }
 
-.strand-palette-row:selected {
+.strand-palette-list row:selected {
     background-color: #313244;
     color: #cdd6f4;
+}
+
+.strand-palette-list row:hover {
+    background-color: #262738;
 }
 
 .strand-palette-title {
@@ -81,7 +86,14 @@ const PALETTE_CSS: &str = r#"
 }
 "#;
 
-/// Reusable Command Palette Dialog supporting File, Buffer, and Ex-Command selection.
+#[derive(Clone)]
+struct PaletteRowData {
+    item: PaletteItem,
+    indices: Vec<u32>,
+}
+
+/// Reusable Command Palette Dialog supporting File, Buffer, and Ex-Command selection
+/// using virtualized `GtkListView` for 144Hz smooth rendering across large codebases.
 pub struct CommandPaletteDialog;
 
 impl CommandPaletteDialog {
@@ -101,13 +113,10 @@ impl CommandPaletteDialog {
         });
     }
 
-    /// Open a modal command palette dialog.
+    /// Open a modal command palette dialog with virtualized list rendering.
     pub fn show<F>(
         parent: &impl IsA<gtk::Window>,
-        title: &str,
-        placeholder: &str,
-        mode: PaletteMode,
-        initial_input: &str,
+        config: PaletteConfig<'_>,
         items: Vec<PaletteItem>,
         on_select: F,
     ) -> adw::Window
@@ -115,6 +124,12 @@ impl CommandPaletteDialog {
         F: Fn(PaletteItem, String) + 'static,
     {
         Self::init_css();
+
+        let title = config.title;
+        let placeholder = config.placeholder;
+        let mode = config.mode;
+        let initial_input = config.initial_input;
+        let initial_cursor = config.initial_cursor;
 
         let window = adw::Window::builder()
             .title(title)
@@ -156,7 +171,7 @@ impl CommandPaletteDialog {
         header_box.append(&counter_label);
         vbox.append(&header_box);
 
-        // Scrolled List View
+        // Virtualized Scrolled List View using GtkListView + GtkSignalListItemFactory
         let scrolled = gtk::ScrolledWindow::builder()
             .hexpand(true)
             .vexpand(true)
@@ -165,138 +180,166 @@ impl CommandPaletteDialog {
             .min_content_height(300)
             .build();
 
-        let list_box = gtk::ListBox::builder()
-            .selection_mode(gtk::SelectionMode::Single)
-            .build();
-        list_box.add_css_class("strand-palette-list");
-        scrolled.set_child(Some(&list_box));
+        let store = gio::ListStore::new::<glib::BoxedAnyObject>();
+        let selection = gtk::SingleSelection::new(Some(store.clone()));
+        selection.set_autoselect(false);
+        selection.set_can_unselect(false);
+
+        let factory = gtk::SignalListItemFactory::new();
+        factory.connect_setup(|_factory, list_item| {
+            let list_item = list_item.downcast_ref::<gtk::ListItem>().unwrap();
+            let row_box = gtk::Box::builder()
+                .orientation(gtk::Orientation::Horizontal)
+                .spacing(8)
+                .valign(gtk::Align::Center)
+                .build();
+            row_box.add_css_class("strand-palette-row");
+
+            let text_box = gtk::Box::builder()
+                .orientation(gtk::Orientation::Vertical)
+                .spacing(2)
+                .hexpand(true)
+                .build();
+
+            let title_label = gtk::Label::builder()
+                .xalign(0.0)
+                .use_markup(true)
+                .ellipsize(pango::EllipsizeMode::End)
+                .build();
+            title_label.add_css_class("strand-palette-title");
+
+            let sub_label = gtk::Label::builder()
+                .xalign(0.0)
+                .ellipsize(pango::EllipsizeMode::Start)
+                .build();
+            sub_label.add_css_class("strand-palette-subtitle");
+
+            text_box.append(&title_label);
+            text_box.append(&sub_label);
+            row_box.append(&text_box);
+
+            let badge_label = gtk::Label::builder()
+                .valign(gtk::Align::Center)
+                .build();
+            badge_label.add_css_class("strand-palette-badge");
+            row_box.append(&badge_label);
+
+            list_item.set_child(Some(&row_box));
+        });
+
+        factory.connect_bind(|_factory, list_item| {
+            let list_item = list_item.downcast_ref::<gtk::ListItem>().unwrap();
+            let row_box = list_item.child().and_downcast::<gtk::Box>().unwrap();
+            let text_box = row_box.first_child().and_downcast::<gtk::Box>().unwrap();
+            let title_label = text_box.first_child().and_downcast::<gtk::Label>().unwrap();
+            let sub_label = title_label.next_sibling().and_downcast::<gtk::Label>().unwrap();
+            let badge_label = row_box.last_child().and_downcast::<gtk::Label>().unwrap();
+
+            let boxed = list_item.item().and_downcast::<glib::BoxedAnyObject>().unwrap();
+            let data: std::cell::Ref<PaletteRowData> = boxed.borrow();
+
+            let highlighted = if !data.indices.is_empty() {
+                highlight_pango_markup_with_tags(
+                    &data.item.title,
+                    &data.indices,
+                    "<span foreground=\"#89b4fa\" weight=\"bold\">",
+                    "</span>",
+                )
+            } else {
+                escape_pango(&data.item.title)
+            };
+            title_label.set_markup(&highlighted);
+
+            if let Some(ref subtitle) = data.item.subtitle {
+                sub_label.set_text(subtitle);
+                sub_label.set_visible(true);
+            } else {
+                sub_label.set_text("");
+                sub_label.set_visible(false);
+            }
+
+            if let Some(ref badge) = data.item.badge {
+                badge_label.set_text(badge);
+                badge_label.set_visible(true);
+            } else {
+                badge_label.set_text("");
+                badge_label.set_visible(false);
+            }
+        });
+
+        let list_view = gtk::ListView::new(Some(selection.clone()), Some(factory));
+        list_view.add_css_class("strand-palette-list");
+        list_view.set_single_click_activate(true);
+        scrolled.set_child(Some(&list_view));
         vbox.append(&scrolled);
 
         window.set_content(Some(&vbox));
 
         let all_items = Rc::new(items);
-        let filtered_items = Rc::new(RefCell::new(Vec::<(PaletteItem, Vec<u32>)>::new()));
         let matcher = Rc::new(RefCell::new(FuzzyMatcher::new()));
         let on_select = Rc::new(on_select);
 
-        // Helper to render filtered items to the ListBox
-        let render_items = {
-            let list_box = list_box.clone();
-            let counter_label = counter_label.clone();
-            let all_items = all_items.clone();
-            let filtered_items = filtered_items.clone();
-
-            move || {
-                // Clear existing children
-                while let Some(child) = list_box.first_child() {
-                    list_box.remove(&child);
+        let scroll_to = {
+            let list_view = list_view.clone();
+            Rc::new(move |pos: u32| {
+                if list_view.is_mapped() && list_view.width() > 0 {
+                    let _ = list_view.activate_action("list.scroll-to-item", Some(&pos.to_variant()));
                 }
-
-                let items = filtered_items.borrow();
-                let shown_count = items.len();
-                counter_label.set_text(&format!("{} / {}", shown_count, all_items.len()));
-
-                // Cap displayed rows at 150 for 144Hz smoothness
-                for (item, indices) in items.iter().take(150) {
-                    let row = gtk::ListBoxRow::new();
-                    row.add_css_class("strand-palette-row");
-
-                    let hbox = gtk::Box::builder()
-                        .orientation(gtk::Orientation::Horizontal)
-                        .spacing(8)
-                        .valign(gtk::Align::Center)
-                        .build();
-
-                    let text_box = gtk::Box::builder()
-                        .orientation(gtk::Orientation::Vertical)
-                        .spacing(2)
-                        .hexpand(true)
-                        .build();
-
-                    let title_label = gtk::Label::builder()
-                        .xalign(0.0)
-                        .use_markup(true)
-                        .ellipsize(pango::EllipsizeMode::End)
-                        .build();
-                    title_label.add_css_class("strand-palette-title");
-
-                    let highlighted = if !indices.is_empty() {
-                        highlight_pango_markup_with_tags(
-                            &item.title,
-                            indices,
-                            "<span foreground=\"#89b4fa\" weight=\"bold\">",
-                            "</span>",
-                        )
-                    } else {
-                        escape_pango(&item.title)
-                    };
-                    title_label.set_markup(&highlighted);
-                    text_box.append(&title_label);
-
-                    if let Some(ref subtitle) = item.subtitle {
-                        let sub_label = gtk::Label::builder()
-                            .label(subtitle)
-                            .xalign(0.0)
-                            .ellipsize(pango::EllipsizeMode::Start)
-                            .build();
-                        sub_label.add_css_class("strand-palette-subtitle");
-                        text_box.append(&sub_label);
-                    }
-
-                    hbox.append(&text_box);
-
-                    if let Some(ref badge) = item.badge {
-                        let badge_label = gtk::Label::builder()
-                            .label(badge)
-                            .valign(gtk::Align::Center)
-                            .build();
-                        badge_label.add_css_class("strand-palette-badge");
-                        hbox.append(&badge_label);
-                    }
-
-                    row.set_child(Some(&hbox));
-                    list_box.append(&row);
-                }
-
-                if shown_count > 0
-                    && let Some(first_row) = list_box.row_at_index(0)
-                {
-                    list_box.select_row(Some(&first_row));
-                }
-            }
+            })
         };
 
-        // Helper to filter items based on query
+        // Filter and virtualized population helper
         let do_filter = {
             let all_items = all_items.clone();
-            let filtered_items = filtered_items.clone();
+            let store = store.clone();
+            let selection = selection.clone();
+            let counter_label = counter_label.clone();
             let matcher = matcher.clone();
-            let render_items = render_items.clone();
+            let scroll_to = scroll_to.clone();
 
-            move |query: &str| {
+            move |query: &str, target_cursor: usize| {
                 let query = query.trim();
                 let is_path = mode == PaletteMode::FilePicker;
 
                 let mut list = Vec::new();
                 if query.is_empty() {
                     for item in all_items.iter() {
-                        list.push((item.clone(), Vec::new()));
+                        list.push(PaletteRowData {
+                            item: item.clone(),
+                            indices: Vec::new(),
+                        });
                     }
                 } else {
                     let mut m = matcher.borrow_mut();
                     let results = m.filter_and_sort(query, &all_items, |it| &it.search_key, is_path);
                     for r in results {
-                        list.push((r.item, r.indices));
+                        list.push(PaletteRowData {
+                            item: r.item,
+                            indices: r.indices,
+                        });
                     }
                 }
 
-                *filtered_items.borrow_mut() = list;
-                render_items();
+                let total_shown = list.len();
+                counter_label.set_text(&format!("{} / {}", total_shown, all_items.len()));
+
+                let boxed_items: Vec<glib::BoxedAnyObject> = list
+                    .into_iter()
+                    .map(glib::BoxedAnyObject::new)
+                    .collect();
+
+                store.splice(0, store.n_items(), &boxed_items);
+
+                if total_shown > 0 {
+                    let cur = (target_cursor as u32).min((total_shown - 1) as u32);
+                    selection.set_selected(cur);
+                    scroll_to(cur);
+                }
             }
         };
 
-        // Initial filter run
-        do_filter(initial_input);
+        // Initial filter run with starting cursor position
+        do_filter(initial_input, initial_cursor);
         if !initial_input.is_empty() {
             search_entry.set_text(initial_input);
             search_entry.set_position(-1);
@@ -306,33 +349,31 @@ impl CommandPaletteDialog {
         {
             let do_filter = do_filter.clone();
             search_entry.connect_search_changed(move |entry| {
-                do_filter(&entry.text());
+                do_filter(&entry.text(), 0);
             });
         }
 
         // Row activation helper (Enter or Click)
         let activate_selection = {
             let window = window.clone();
-            let filtered_items = filtered_items.clone();
-            let list_box = list_box.clone();
+            let selection = selection.clone();
+            let store = store.clone();
             let search_entry = search_entry.clone();
             let on_select = on_select.clone();
 
             move || {
                 let current_text = search_entry.text().to_string();
-                let selected_idx = list_box.selected_row().map(|r| r.index());
+                let selected_pos = selection.selected();
 
-                if let Some(idx) = selected_idx
-                    && idx >= 0
+                if selected_pos != gtk::INVALID_LIST_POSITION
+                    && let Some(obj) = store.item(selected_pos).and_downcast::<glib::BoxedAnyObject>()
                 {
-                    let items = filtered_items.borrow();
-                    if let Some((item, _)) = items.get(idx as usize) {
-                        let item = item.clone();
-                        drop(items);
-                        window.close();
-                        on_select(item, current_text);
-                        return;
-                    }
+                    let row_data: std::cell::Ref<PaletteRowData> = obj.borrow();
+                    let item = row_data.item.clone();
+                    drop(row_data);
+                    window.close();
+                    on_select(item, current_text);
+                    return;
                 }
 
                 // If in command mode with manual text (e.g. :w new_name.rs or :theme latte)
@@ -345,10 +386,10 @@ impl CommandPaletteDialog {
             }
         };
 
-        // ListBox row activated on mouse click / double click
+        // ListView item activated on single click or row activation
         {
             let activate_selection = activate_selection.clone();
-            list_box.connect_row_activated(move |_, _| {
+            list_view.connect_activate(move |_view, _pos| {
                 activate_selection();
             });
         }
@@ -358,10 +399,10 @@ impl CommandPaletteDialog {
         key_controller.set_propagation_phase(gtk::PropagationPhase::Capture);
         {
             let window = window.clone();
-            let list_box = list_box.clone();
-            let scrolled = scrolled.clone();
-            let filtered_items = filtered_items.clone();
+            let selection = selection.clone();
+            let store = store.clone();
             let activate_selection = activate_selection.clone();
+            let scroll_to = scroll_to.clone();
 
             key_controller.connect_key_pressed(move |_, keyval, _keycode, state| {
                 let is_ctrl = state.contains(gdk::ModifierType::CONTROL_MASK);
@@ -376,22 +417,16 @@ impl CommandPaletteDialog {
                 if keyval == gdk::Key::Down
                     || (is_ctrl && (keyval == gdk::Key::n || keyval == gdk::Key::N))
                 {
-                    let count = filtered_items.borrow().len() as i32;
-                    let current = list_box.selected_row().map(|r| r.index()).unwrap_or(-1);
-                    let next = (current + 1).min(count - 1);
-                    if next >= 0
-                        && let Some(row) = list_box.row_at_index(next)
-                    {
-                        list_box.select_row(Some(&row));
-                        let adj = scrolled.vadjustment();
-                        let alloc = row.allocation();
-                        let y = alloc.y() as f64;
-                        let h = alloc.height() as f64;
-                        let page = adj.page_size();
-                        let val = adj.value();
-                        if y + h > val + page {
-                            adj.set_value(y + h - page);
-                        }
+                    let count = store.n_items();
+                    if count > 0 {
+                        let cur = selection.selected();
+                        let next = if cur == gtk::INVALID_LIST_POSITION {
+                            0
+                        } else {
+                            (cur + 1).min(count - 1)
+                        };
+                        selection.set_selected(next);
+                        scroll_to(next);
                     }
                     return glib::Propagation::Stop;
                 }
@@ -400,40 +435,48 @@ impl CommandPaletteDialog {
                 if keyval == gdk::Key::Up
                     || (is_ctrl && (keyval == gdk::Key::p || keyval == gdk::Key::P))
                 {
-                    let current = list_box.selected_row().map(|r| r.index()).unwrap_or(0);
-                    let prev = (current - 1).max(0);
-                    if let Some(row) = list_box.row_at_index(prev) {
-                        list_box.select_row(Some(&row));
-                        let adj = scrolled.vadjustment();
-                        let alloc = row.allocation();
-                        let y = alloc.y() as f64;
-                        let val = adj.value();
-                        if y < val {
-                            adj.set_value(y);
-                        }
+                    let count = store.n_items();
+                    if count > 0 {
+                        let cur = selection.selected();
+                        let prev = if cur == gtk::INVALID_LIST_POSITION {
+                            0
+                        } else {
+                            cur.saturating_sub(1)
+                        };
+                        selection.set_selected(prev);
+                        scroll_to(prev);
                     }
                     return glib::Propagation::Stop;
                 }
 
                 // Page Down: jump 5 items
                 if keyval == gdk::Key::Page_Down {
-                    let count = filtered_items.borrow().len() as i32;
-                    let current = list_box.selected_row().map(|r| r.index()).unwrap_or(-1);
-                    let next = (current + 5).min(count - 1);
-                    if next >= 0
-                        && let Some(row) = list_box.row_at_index(next)
-                    {
-                        list_box.select_row(Some(&row));
+                    let count = store.n_items();
+                    if count > 0 {
+                        let cur = selection.selected();
+                        let next = if cur == gtk::INVALID_LIST_POSITION {
+                            0
+                        } else {
+                            (cur + 5).min(count - 1)
+                        };
+                        selection.set_selected(next);
+                        scroll_to(next);
                     }
                     return glib::Propagation::Stop;
                 }
 
                 // Page Up: jump 5 items up
                 if keyval == gdk::Key::Page_Up {
-                    let current = list_box.selected_row().map(|r| r.index()).unwrap_or(0);
-                    let prev = (current - 5).max(0);
-                    if let Some(row) = list_box.row_at_index(prev) {
-                        list_box.select_row(Some(&row));
+                    let count = store.n_items();
+                    if count > 0 {
+                        let cur = selection.selected();
+                        let prev = if cur == gtk::INVALID_LIST_POSITION {
+                            0
+                        } else {
+                            cur.saturating_sub(5)
+                        };
+                        selection.set_selected(prev);
+                        scroll_to(prev);
                     }
                     return glib::Propagation::Stop;
                 }
@@ -451,6 +494,23 @@ impl CommandPaletteDialog {
         search_entry.add_controller(key_controller);
         window.present();
         search_entry.grab_focus();
+
+        if initial_cursor > 0 {
+            let list_view_clone = list_view.clone();
+            let scroll_to = scroll_to.clone();
+            let mut attempts = 0;
+            glib::idle_add_local(move || {
+                attempts += 1;
+                if list_view_clone.is_mapped() && list_view_clone.width() > 0 {
+                    scroll_to(initial_cursor as u32);
+                    glib::ControlFlow::Break
+                } else if attempts > 10 {
+                    glib::ControlFlow::Break
+                } else {
+                    glib::ControlFlow::Continue
+                }
+            });
+        }
 
         window
     }
@@ -473,10 +533,13 @@ mod tests {
         let sel_clone = selected.clone();
         let dialog = CommandPaletteDialog::show(
             &parent,
-            "Test Palette",
-            "Search...",
-            PaletteMode::FilePicker,
-            "",
+            PaletteConfig {
+                title: "Test Palette",
+                placeholder: "Search...",
+                mode: PaletteMode::FilePicker,
+                initial_input: "",
+                initial_cursor: 0,
+            },
             items,
             move |item, _raw| {
                 *sel_clone.borrow_mut() = Some(item.id);
@@ -484,6 +547,48 @@ mod tests {
         );
 
         assert_eq!(dialog.title().as_deref(), Some("Test Palette"));
+        for _ in 0..20 {
+            glib::MainContext::default().iteration(false);
+        }
         dialog.close();
+        for _ in 0..10 {
+            glib::MainContext::default().iteration(false);
+        }
+    }
+
+    #[gtk::test]
+    fn test_dialog_creation_with_nonzero_cursor() {
+        let parent = gtk::Window::new();
+        let items = vec![
+            PaletteItem::new("buf1", "1: src/main.rs", "src/main.rs"),
+            PaletteItem::new("buf2", "2: src/app.rs", "src/app.rs"),
+            PaletteItem::new("buf3", "3: Cargo.toml", "Cargo.toml"),
+        ];
+
+        let selected = Rc::new(RefCell::new(None));
+        let sel_clone = selected.clone();
+        let dialog = CommandPaletteDialog::show(
+            &parent,
+            PaletteConfig {
+                title: "Buffers",
+                placeholder: "Open buffer...",
+                mode: PaletteMode::BufferPicker,
+                initial_input: "",
+                initial_cursor: 1,
+            },
+            items,
+            move |item, _raw| {
+                *sel_clone.borrow_mut() = Some(item.id);
+            },
+        );
+
+        assert_eq!(dialog.title().as_deref(), Some("Buffers"));
+        for _ in 0..20 {
+            glib::MainContext::default().iteration(false);
+        }
+        dialog.close();
+        for _ in 0..10 {
+            glib::MainContext::default().iteration(false);
+        }
     }
 }

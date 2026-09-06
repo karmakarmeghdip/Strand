@@ -54,6 +54,43 @@ pub fn file_open(cx: &mut Context, path: &Path) -> KeyHandleResult {
     }
 }
 
+/// Quit the editor (`:q` / `:quit`). Fails if any open buffers are modified and `force` is false.
+/// If unmodified, or `force` is true, returns `KeyHandleResult::Quit`.
+/// Matches Helix's `quit` and `buffers_remaining_impl`.
+pub fn quit(cx: &mut Context, force: bool) -> KeyHandleResult {
+    if !force {
+        let modified_ids: Vec<(DocumentId, String)> = cx
+            .state
+            .documents
+            .values()
+            .filter(|doc| doc.is_modified())
+            .map(|doc| (doc.id(), doc.display_name()))
+            .collect();
+
+        if let Some((first_id, _)) = modified_ids.first() {
+            let current_id = cx.state.current_document_id;
+            // If current buffer is not modified, switch to the first modified doc
+            if current_id != *first_id {
+                cx.state.switch_document(*first_id);
+            }
+            let count = modified_ids.len();
+            let s = if count == 1 { "" } else { "s" };
+            let names: Vec<String> = modified_ids.iter().map(|(_, name)| name.clone()).collect();
+            cx.set_error(format!(
+                "{} unsaved buffer{} remaining: {:?} (use :q! to force)",
+                count, s, names
+            ));
+            return if current_id != *first_id {
+                KeyHandleResult::DocumentChanged(*first_id)
+            } else {
+                KeyHandleResult::Stop
+            };
+        }
+    }
+
+    KeyHandleResult::Quit
+}
+
 /// Request to open file picker (`<Space>f`).
 pub fn open_file_picker(cx: &mut Context) -> KeyHandleResult {
     let files = cx.state.list_project_files();
@@ -99,14 +136,19 @@ pub fn execute_command(cx: &mut Context, input: &str) -> KeyHandleResult {
                 file_save(cx)
             }
         }
-        "q" | "quit" => buffer_close(cx),
-        "q!" | "quit!" => buffer_force_close(cx),
+        "q" | "quit" => quit(cx, false),
+        "q!" | "quit!" => quit(cx, true),
         "bc" | "bclose" => buffer_close(cx),
         "bc!" | "bclose!" => buffer_force_close(cx),
         "wq" | "x" => {
             let res = file_save(cx);
             if res == KeyHandleResult::Stop {
-                buffer_close(cx)
+                if let Some((_, severity)) = &cx.state.status_msg
+                    && *severity == crate::components::statusline::DiagnosticSeverity::Error
+                {
+                    return KeyHandleResult::Stop;
+                }
+                quit(cx, false)
             } else {
                 res
             }
@@ -123,11 +165,26 @@ pub fn execute_command(cx: &mut Context, input: &str) -> KeyHandleResult {
         "bp" | "bprev" | "buffer-previous" => goto_previous_buffer(cx),
         "b" | "buffer" => {
             if let Some(arg) = arg {
-                if let Ok(id_num) = arg.parse::<usize>() {
-                    let doc_id = DocumentId(id_num);
+                if let Ok(num) = arg.parse::<usize>() {
+                    // Try 1-based index (1..n) matching buffer picker list numbering
+                    let mru_ids: Vec<DocumentId> = cx
+                        .state
+                        .documents_in_mru_order()
+                        .into_iter()
+                        .map(|d| d.id())
+                        .collect();
+                    if num >= 1 && num <= mru_ids.len() {
+                        let doc_id = mru_ids[num - 1];
+                        cx.state.switch_document(doc_id);
+                        let display = cx.state.current_document().display_name();
+                        cx.set_status(format!("Switched to buffer {}: {}", num, display));
+                        return KeyHandleResult::DocumentChanged(doc_id);
+                    }
+                    // Fallback to raw DocumentId
+                    let doc_id = DocumentId(num);
                     if cx.state.switch_document(doc_id) {
                         let display = cx.state.current_document().display_name();
-                        cx.set_status(format!("Switched to buffer {}: {}", doc_id, display));
+                        cx.set_status(format!("Switched to buffer: {}", display));
                         return KeyHandleResult::DocumentChanged(doc_id);
                     }
                 }
@@ -142,7 +199,7 @@ pub fn execute_command(cx: &mut Context, input: &str) -> KeyHandleResult {
                 if let Some(id) = found_id {
                     cx.state.switch_document(id);
                     let display = cx.state.current_document().display_name();
-                    cx.set_status(format!("Switched to buffer {}: {}", id, display));
+                    cx.set_status(format!("Switched to buffer: {}", display));
                     KeyHandleResult::DocumentChanged(id)
                 } else {
                     cx.set_error(format!("Buffer not found: {arg}"));
@@ -197,7 +254,7 @@ pub fn execute_command(cx: &mut Context, input: &str) -> KeyHandleResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gtk::prelude::Cast;
+    use gtk::prelude::{Cast, TextBufferExt};
     use crate::editor::state::EditorState;
 
     #[gtk::test]
@@ -239,5 +296,20 @@ mod tests {
         // Test :theme
         let res_th = execute_command(&mut cx, ":theme catppuccin-latte");
         assert_eq!(res_th, KeyHandleResult::Stop);
+
+        // Test :q when clean: should return Quit
+        let res_q = execute_command(&mut cx, ":q");
+        assert_eq!(res_q, KeyHandleResult::Quit);
+
+        // If a document is modified, :q should refuse and return Stop or switch
+        cx.state.current_document().buffer().set_text("unsaved edits");
+        assert!(cx.state.current_document().is_modified());
+        let res_q_unsaved = execute_command(&mut cx, ":q");
+        assert_eq!(res_q_unsaved, KeyHandleResult::Stop);
+        assert!(cx.state.status_msg.is_some());
+
+        // :q! should force quit
+        let res_q_force = execute_command(&mut cx, ":q!");
+        assert_eq!(res_q_force, KeyHandleResult::Quit);
     }
 }

@@ -41,10 +41,13 @@ where
     let root_buf = root.to_path_buf();
     CommandPaletteDialog::show(
         parent,
-        "Open File",
-        "Type to filter files...",
-        PaletteMode::FilePicker,
-        "",
+        super::PaletteConfig {
+            title: "Open File",
+            placeholder: "Type to filter files...",
+            mode: PaletteMode::FilePicker,
+            initial_input: "",
+            initial_cursor: 0,
+        },
         items,
         move |item, _raw| {
             let full_path = root_buf.join(&item.id);

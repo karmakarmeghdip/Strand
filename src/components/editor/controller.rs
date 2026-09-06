@@ -23,6 +23,8 @@ pub enum KeyHandleResult {
     OpenBufferPicker,
     /// Open command palette requested (:).
     OpenCommandPalette,
+    /// Application quit requested (:q, :bc on last buffer).
+    Quit,
 }
 
 /// Imperative handler for a single GDK key event in CAPTURE phase.

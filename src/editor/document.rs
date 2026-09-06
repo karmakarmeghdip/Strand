@@ -68,6 +68,7 @@ pub struct Document {
     indent_style: IndentStyle,
     line_ending: LineEnding,
     read_only: bool,
+    pub focused_at: std::time::Instant,
 }
 
 impl Document {
@@ -93,6 +94,7 @@ impl Document {
             indent_style: IndentStyle::Spaces(4),
             line_ending: LineEnding::Lf,
             read_only: false,
+            focused_at: std::time::Instant::now(),
         }
     }
 
@@ -181,7 +183,18 @@ impl Document {
             indent_style,
             line_ending,
             read_only,
+            focused_at: std::time::Instant::now(),
         })
+    }
+
+    #[inline]
+    pub fn focused_at(&self) -> std::time::Instant {
+        self.focused_at
+    }
+
+    #[inline]
+    pub fn touch_focused(&mut self) {
+        self.focused_at = std::time::Instant::now();
     }
 
     /// Save buffer contents to its backing file path.

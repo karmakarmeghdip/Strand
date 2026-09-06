@@ -60,3 +60,13 @@ pub enum PaletteMode {
     BufferPicker,
     Command,
 }
+
+/// Configuration options for opening a command palette dialog.
+#[derive(Debug, Clone)]
+pub struct PaletteConfig<'a> {
+    pub title: &'a str,
+    pub placeholder: &'a str,
+    pub mode: PaletteMode,
+    pub initial_input: &'a str,
+    pub initial_cursor: usize,
+}
